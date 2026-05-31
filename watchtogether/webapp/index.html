@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WatchTogether</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@500;600;700;800;900&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #07070e;
+      --surface: #10101a;
+      --border: #1e1e30;
+      --accent: #7c6af7;
+      --accent2: #4ecdc4;
+      --text: #e8e8f0;
+      --muted: #6060a0;
+      --green: #2ecc71;
+      --danger: #ff4757;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Syne', sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    /* Ambient glow background */
+    body::before {
+      content: '';
+      position: fixed;
+      top: -200px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 600px;
+      height: 600px;
+      background: radial-gradient(ellipse, rgba(124,106,247,0.15) 0%, transparent 70%);
+      pointer-events: none;
+    }
+    body::after {
+      content: '';
+      position: fixed;
+      bottom: -200px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 400px;
+      height: 400px;
+      background: radial-gradient(ellipse, rgba(78,205,196,0.08) 0%, transparent 70%);
+      pointer-events: none;
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 48px;
+      max-width: 520px;
+      width: 100%;
+      text-align: center;
+      position: relative;
+      z-index: 1;
+    }
+
+    .logo {
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 32px;
+    }
+
+    .logo-icon {
+      width: 48px;
+      height: 48px;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      border-radius: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .logo-icon svg { width: 26px; height: 26px; }
+
+    .logo-text {
+      font-size: 28px;
+      font-weight: 900;
+      background: linear-gradient(135deg, #fff 0%, var(--accent2) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      letter-spacing: -0.5px;
+    }
+
+    /* ── Room State Views ── */
+    #view-found, #view-notfound, #view-loading, #view-success {
+      display: none;
+    }
+    #view-found.active, #view-notfound.active, #view-loading.active, #view-success.active {
+      display: block;
+    }
+
+    /* Loading */
+    .loading-ring {
+      width: 48px;
+      height: 48px;
+      border: 3px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin: 0 auto 20px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .loading-text {
+      color: var(--muted);
+      font-size: 15px;
+      font-weight: 600;
+    }
+
+    /* Room found */
+    .room-badge {
+      display: inline-block;
+      background: linear-gradient(135deg, rgba(124,106,247,0.15) 0%, rgba(78,205,196,0.1) 100%);
+      border: 1px solid rgba(124,106,247,0.4);
+      border-radius: 12px;
+      padding: 6px 16px;
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--accent2);
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      margin-bottom: 16px;
+    }
+
+    h1 {
+      font-size: 32px;
+      font-weight: 800;
+      line-height: 1.2;
+      margin-bottom: 12px;
+    }
+
+    .room-id-hero {
+      font-family: 'DM Mono', monospace;
+      font-size: 40px;
+      font-weight: 500;
+      color: var(--accent2);
+      letter-spacing: 8px;
+      margin: 24px 0;
+      text-shadow: 0 0 30px rgba(78,205,196,0.3);
+    }
+
+    .meta {
+      background: rgba(255,255,255,0.03);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px 20px;
+      margin: 20px 0;
+      text-align: left;
+    }
+
+    .meta-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 6px 0;
+      font-size: 13px;
+    }
+    .meta-row:not(:last-child) { border-bottom: 1px solid var(--border); }
+    .meta-label { color: var(--muted); font-weight: 600; }
+    .meta-value {
+      color: var(--text);
+      font-family: 'DM Mono', monospace;
+      font-size: 12px;
+      max-width: 200px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    p.subtitle {
+      color: var(--muted);
+      font-size: 15px;
+      line-height: 1.6;
+      margin-bottom: 28px;
+    }
+
+    .btn {
+      background: linear-gradient(135deg, var(--accent) 0%, #5a4de6 100%);
+      border: none;
+      border-radius: 12px;
+      color: #fff;
+      cursor: pointer;
+      font-family: 'Syne', sans-serif;
+      font-size: 15px;
+      font-weight: 700;
+      padding: 14px 32px;
+      transition: all 0.18s;
+      width: 100%;
+      letter-spacing: 0.2px;
+    }
+    .btn:hover { filter: brightness(1.12); transform: translateY(-1px); }
+    .btn:active { transform: scale(0.98); }
+
+    /* Extension not found hint */
+    .hint {
+      margin-top: 16px;
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.6;
+    }
+    .hint a { color: var(--accent); text-decoration: none; }
+    .hint a:hover { text-decoration: underline; }
+
+    /* Not found */
+    .notfound-icon {
+      font-size: 48px;
+      margin-bottom: 16px;
+    }
+
+    /* Success */
+    .success-icon {
+      width: 64px;
+      height: 64px;
+      background: rgba(46,204,113,0.15);
+      border: 1px solid rgba(46,204,113,0.3);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 24px;
+    }
+    .success-icon svg { width: 32px; height: 32px; stroke: var(--green); }
+
+    /* Animations */
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(16px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .card { animation: fadeUp 0.4s ease-out; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo">
+      <div class="logo-icon">
+        <svg viewBox="0 0 24 24" fill="none">
+          <path d="M15 10l4.553-2.276A1 1 0 0121 8.723v6.554a1 1 0 01-1.447.894L15 14M3 8a2 2 0 012-2h10a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8z"
+            stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </div>
+      <span class="logo-text">WatchTogether</span>
+    </div>
+
+    <!-- Loading -->
+    <div id="view-loading">
+      <div class="loading-ring"></div>
+      <p class="loading-text">Fetching room info…</p>
+    </div>
+
+    <!-- Room Found -->
+    <div id="view-found">
+      <div class="room-badge">🎬 Room Found</div>
+      <h1>You're invited to watch</h1>
+      <div class="room-id-hero" id="room-id-hero">—</div>
+      <div class="meta">
+        <div class="meta-row">
+          <span class="meta-label">Participants</span>
+          <span class="meta-value" id="participant-count">—</span>
+        </div>
+        <div class="meta-row">
+          <span class="meta-label">Sync Mode</span>
+          <span class="meta-value" id="sync-mode">—</span>
+        </div>
+        <div class="meta-row">
+          <span class="meta-label">Movie</span>
+          <span class="meta-value" id="movie-url-display">—</span>
+        </div>
+      </div>
+      <p class="subtitle">
+        Click below and the WatchTogether extension will automatically open the movie and sync your playback.
+      </p>
+      <button class="btn" onclick="joinRoom()">Join Watch Room</button>
+      <p class="hint">
+        Don't have the extension? 
+        <a href="https://chrome.google.com/webstore" target="_blank">Install WatchTogether for Chrome</a>
+      </p>
+    </div>
+
+    <!-- Room Not Found -->
+    <div id="view-notfound">
+      <div class="notfound-icon">🔍</div>
+      <h1>Room not found</h1>
+      <p class="subtitle">This room may have expired or the link is invalid. Ask the host to create a new room.</p>
+    </div>
+
+    <!-- Success (extension notified) -->
+    <div id="view-success">
+      <div class="success-icon">
+        <svg viewBox="0 0 24 24" fill="none">
+          <polyline points="20 6 9 17 4 12" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </div>
+      <h1>Joining room…</h1>
+      <p class="subtitle">The WatchTogether extension is opening the movie. Switch to that tab and enjoy! 🍿</p>
+    </div>
+  </div>
+
+  <script type="module">
+    const API_BASE = "http://localhost:8080/api";
+
+    function show(id) {
+      ["view-loading", "view-found", "view-notfound", "view-success"].forEach(v => {
+        document.getElementById(v).classList.remove("active");
+      });
+      document.getElementById(id).classList.add("active");
+    }
+
+    // Extract room ID from URL: /room/ABC123
+    const match = window.location.pathname.match(/\/room\/([A-Z0-9]+)/i);
+    const roomId = match ? match[1].toUpperCase() : null;
+
+    let roomData = null;
+
+    async function init() {
+      if (!roomId) {
+        show("view-notfound");
+        return;
+      }
+
+      show("view-loading");
+      try {
+        const res = await fetch(`${API_BASE}/rooms/${roomId}`);
+        if (!res.ok) throw new Error("not found");
+        roomData = await res.json();
+
+        document.getElementById("room-id-hero").textContent = roomData.roomId;
+        document.getElementById("participant-count").textContent = roomData.participants?.length ?? "?";
+        document.getElementById("sync-mode").textContent = roomData.syncMode;
+        document.getElementById("movie-url-display").textContent =
+          new URL(roomData.movieUrl).hostname;
+
+        show("view-found");
+      } catch (e) {
+        show("view-notfound");
+      }
+    }
+
+    window.joinRoom = async function() {
+      // The extension's background worker handles the tab.onUpdated event
+      // to detect /room/:id URLs and trigger joining. Just show success.
+      show("view-success");
+    };
+
+    init();
+  </script>
+</body>
+</html>

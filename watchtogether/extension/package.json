@@ -1,0 +1,16 @@
+{
+  "name": "watchtogether-extension",
+  "version": "1.0.0",
+  "description": "WatchTogether Chrome Extension",
+  "private": true,
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite build --watch",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.268",
+    "typescript": "^5.3.3",
+    "vite": "^5.1.0"
+  }
+}

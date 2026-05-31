@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WatchTogether</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #0a0a0f;
+      --surface: #13131a;
+      --surface2: #1c1c28;
+      --border: #2a2a3a;
+      --accent: #7c6af7;
+      --accent2: #4ecdc4;
+      --danger: #ff4757;
+      --text: #e8e8f0;
+      --muted: #7070a0;
+      --green: #2ecc71;
+      --amber: #f39c12;
+      --radius: 10px;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      width: 360px;
+      min-height: 420px;
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Syne', sans-serif;
+      font-size: 14px;
+      overflow: hidden;
+    }
+
+    /* ── Header ── */
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 16px 20px 12px;
+      border-bottom: 1px solid var(--border);
+      background: linear-gradient(135deg, #0d0d1a 0%, #0a0a0f 100%);
+    }
+
+    .logo-mark {
+      width: 32px;
+      height: 32px;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .logo-mark svg { width: 18px; height: 18px; }
+
+    .header h1 {
+      font-size: 18px;
+      font-weight: 800;
+      letter-spacing: -0.3px;
+      background: linear-gradient(135deg, #fff 0%, var(--accent2) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .ws-badge {
+      margin-left: auto;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--muted);
+      transition: background 0.3s;
+    }
+    .ws-badge.connected { background: var(--green); box-shadow: 0 0 6px var(--green); }
+    .ws-badge.disconnected { background: var(--danger); }
+
+    /* ── Main Content ── */
+    .content { padding: 16px 20px; display: flex; flex-direction: column; gap: 14px; }
+
+    /* ── Input ── */
+    .input-group { display: flex; flex-direction: column; gap: 6px; }
+    .input-group label { font-size: 11px; font-weight: 600; color: var(--muted); letter-spacing: 0.8px; text-transform: uppercase; }
+    .input-group input {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text);
+      font-family: 'DM Mono', monospace;
+      font-size: 12px;
+      padding: 10px 12px;
+      width: 100%;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .input-group input:focus { border-color: var(--accent); }
+    .input-group input::placeholder { color: var(--muted); }
+
+    /* ── Buttons ── */
+    .btn {
+      border: none;
+      border-radius: var(--radius);
+      cursor: pointer;
+      font-family: 'Syne', sans-serif;
+      font-size: 13px;
+      font-weight: 700;
+      padding: 11px 16px;
+      transition: all 0.18s;
+      width: 100%;
+    }
+    .btn:active { transform: scale(0.97); }
+
+    .btn-primary {
+      background: linear-gradient(135deg, var(--accent) 0%, #5a4de6 100%);
+      color: #fff;
+    }
+    .btn-primary:hover { filter: brightness(1.12); }
+    .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .btn-secondary {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--text);
+    }
+    .btn-secondary:hover { border-color: var(--accent); color: var(--accent); }
+
+    .btn-danger {
+      background: transparent;
+      border: 1px solid var(--danger);
+      color: var(--danger);
+    }
+    .btn-danger:hover { background: var(--danger); color: #fff; }
+
+    .btn-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
+    /* ── Room Card ── */
+    .room-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+
+    .room-card-header {
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+      padding: 12px 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .room-id-block { display: flex; flex-direction: column; gap: 2px; }
+    .room-id-label { font-size: 10px; font-weight: 600; color: var(--muted); letter-spacing: 0.8px; text-transform: uppercase; }
+    .room-id-value {
+      font-family: 'DM Mono', monospace;
+      font-size: 20px;
+      font-weight: 500;
+      color: var(--accent2);
+      letter-spacing: 4px;
+    }
+
+    .users-pill {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 4px 10px;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--muted);
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .users-pill span { color: var(--green); font-weight: 700; }
+
+    .room-card-body { padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; }
+
+    /* ── Mode Toggles ── */
+    .modes-row { display: flex; gap: 8px; }
+
+    .mode-pill {
+      flex: 1;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      cursor: pointer;
+      transition: all 0.18s;
+    }
+    .mode-pill:hover { border-color: var(--accent); }
+    .mode-pill.active { border-color: var(--accent); background: rgba(124, 106, 247, 0.12); }
+    .mode-pill.active.sync { border-color: var(--accent2); background: rgba(78, 205, 196, 0.10); }
+
+    .mode-pill-label { font-size: 9px; font-weight: 700; letter-spacing: 0.8px; color: var(--muted); text-transform: uppercase; }
+    .mode-pill-value { font-size: 12px; font-weight: 700; color: var(--text); }
+    .mode-pill.active .mode-pill-value { color: var(--accent); }
+    .mode-pill.active.sync .mode-pill-value { color: var(--accent2); }
+
+    /* ── Share URL ── */
+    .share-row {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 10px;
+    }
+    .share-url {
+      flex: 1;
+      font-family: 'DM Mono', monospace;
+      font-size: 10px;
+      color: var(--muted);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .copy-btn {
+      background: var(--accent);
+      border: none;
+      border-radius: 6px;
+      color: #fff;
+      cursor: pointer;
+      font-family: 'Syne', sans-serif;
+      font-size: 10px;
+      font-weight: 700;
+      padding: 4px 8px;
+      flex-shrink: 0;
+      transition: all 0.15s;
+    }
+    .copy-btn:hover { filter: brightness(1.15); }
+    .copy-btn.copied { background: var(--green); }
+
+    /* ── Movie URL display ── */
+    .movie-url {
+      font-family: 'DM Mono', monospace;
+      font-size: 10px;
+      color: var(--muted);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    /* ── Sections ── */
+    .section-label {
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--muted);
+      letter-spacing: 0.8px;
+      text-transform: uppercase;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .section-label::before {
+      content: '';
+      width: 3px;
+      height: 12px;
+      background: var(--accent);
+      border-radius: 2px;
+    }
+
+    /* ── Divider ── */
+    .divider {
+      height: 1px;
+      background: var(--border);
+    }
+
+    .or-divider {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .or-divider::before, .or-divider::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: var(--border);
+    }
+
+    /* ── Error ── */
+    .error-msg {
+      background: rgba(255, 71, 87, 0.1);
+      border: 1px solid rgba(255, 71, 87, 0.3);
+      border-radius: 8px;
+      color: var(--danger);
+      font-size: 12px;
+      padding: 8px 12px;
+    }
+
+    /* ── Loading ── */
+    .loading {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      color: var(--muted);
+      font-size: 13px;
+      gap: 8px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spinner {
+      width: 16px;
+      height: 16px;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+    }
+
+    /* ── Hidden ── */
+    .hidden { display: none !important; }
+
+    /* ── Animations ── */
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+    .fade-in { animation: fadeIn 0.25s ease-out forwards; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="logo-mark">
+      <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M15 10l4.553-2.276A1 1 0 0121 8.723v6.554a1 1 0 01-1.447.894L15 14M3 8a2 2 0 012-2h10a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8z" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </div>
+    <h1>WatchTogether</h1>
+    <div class="ws-badge" id="ws-badge" title="WebSocket status"></div>
+  </div>
+
+  <div class="content">
+    <!-- ── Loading State ── -->
+    <div id="view-loading" class="loading hidden">
+      <div class="spinner"></div>
+      <span id="loading-text">Connecting…</span>
+    </div>
+
+    <!-- ── Error ── -->
+    <div id="error-msg" class="error-msg hidden"></div>
+
+    <!-- ── No Room: Create/Join ── -->
+    <div id="view-home" class="hidden fade-in">
+      <div class="input-group">
+        <label>Movie URL</label>
+        <input type="url" id="movie-url" placeholder="https://netflix.com/watch/..." />
+      </div>
+      <button class="btn btn-primary" id="btn-create">Create Watch Room</button>
+
+      <div class="or-divider">OR</div>
+
+      <div class="input-group">
+        <label>Room ID</label>
+        <input type="text" id="join-room-id" placeholder="ABC123" maxlength="8" style="text-transform:uppercase;letter-spacing:3px;font-size:15px;" />
+      </div>
+      <button class="btn btn-secondary" id="btn-join">Join Room</button>
+    </div>
+
+    <!-- ── Active Room ── -->
+    <div id="view-room" class="hidden fade-in">
+      <div class="room-card">
+        <div class="room-card-header">
+          <div class="room-id-block">
+            <span class="room-id-label">Room</span>
+            <span class="room-id-value" id="room-id-display">—</span>
+          </div>
+          <div class="users-pill">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none">
+              <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2M9 11a4 4 0 100-8 4 4 0 000 8zM23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <span id="user-count">1</span>
+          </div>
+        </div>
+        <div class="room-card-body">
+          <div class="modes-row">
+            <div class="mode-pill" id="pill-sync">
+              <span class="mode-pill-label">Sync</span>
+              <span class="mode-pill-value" id="sync-mode-label">SYNC</span>
+            </div>
+            <div class="mode-pill" id="pill-control">
+              <span class="mode-pill-label">Control</span>
+              <span class="mode-pill-value" id="control-mode-label">SHARED</span>
+            </div>
+          </div>
+          <div class="share-row">
+            <span class="share-url" id="share-url-display">—</span>
+            <button class="copy-btn" id="copy-btn">Copy</button>
+          </div>
+          <div class="movie-url" id="movie-url-display">—</div>
+        </div>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-secondary" id="btn-copy-link">Copy Link</button>
+        <button class="btn btn-danger" id="btn-leave">Leave Room</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
