@@ -1,0 +1,103 @@
+﻿name: Code Review Graph
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  build-graph:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read MCP config and generate DOT (token-optimized)
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs');
+            const core = require('@actions/core');
+            const pr = context.payload.pull_request;
+            if (!pr) { core.setFailed('No pull_request in context'); return; }
+            // Defaults
+            let tokenLimit = 2000; let batchSize = 50; let excerptLen = 300;
+            try {
+              const cfg = fs.readFileSync('.github/code-review-graph/mcp.yml', 'utf8');
+              const get = (key, def) => {
+                const m = cfg.match(new RegExp('^' + key + ':\\s*(\\d+)', 'm'));
+                return m ? Number(m[1]) : def;
+              };
+              tokenLimit = get('token_limit', tokenLimit);
+              batchSize = get('batch_size', batchSize);
+              excerptLen = get('review_excerpt_length', excerptLen);
+            } catch (e) {
+              core.info('No MCP config found, using defaults');
+            }
+
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const pull_number = pr.number;
+
+            // Paginate commits and reviews
+            const commits = await github.paginate(github.rest.pulls.listCommits, {owner, repo, pull_number});
+            const reviews = await github.paginate(github.rest.pulls.listReviews, {owner, repo, pull_number});
+
+            // Collect unique authors (by login or name) and reviewers
+            let authors = new Set();
+            for (const c of commits) {
+              const a = (c.author && c.author.login) || (c.commit && c.commit.author && c.commit.author.name) || 'unknown';
+              authors.add(a);
+            }
+
+            let reviewers = new Set();
+            let edges = {};
+
+            // Build compact representation; truncate review bodies to limit token usage
+            for (const r of reviews) {
+              if (!r.user) continue;
+              const reviewer = r.user.login;
+              reviewers.add(reviewer);
+              for (const a of authors) {
+                const key = `${a}|||${reviewer}`;
+                edges[key] = (edges[key] || 0) + 1;
+              }
+            }
+
+            const nodes = Array.from(new Set([...authors, ...reviewers]));
+            let dot = `digraph G {\n  rankdir=LR;\n  node [shape=box, fontsize=10];\n`;
+            for (const n of nodes) {
+              let label = n;
+              if (label.length > 24) label = label.slice(0,21) + '...';
+              dot += `  "${n}" [label="${label}"];\n`;
+            }
+            for (const k of Object.keys(edges)) {
+              const parts = k.split('|||');
+              const a = parts[0];
+              const b = parts[1];
+              const w = edges[k];
+              dot += `  "${a}" -> "${b}" [label="${w}"];\n`;
+            }
+            dot += `}\n`;
+
+            fs.writeFileSync('pr_graph.dot', dot);
+            core.info('DOT file created (token-optimized)');
+      - name: Install Graphviz
+        run: sudo apt-get update && sudo apt-get install -y graphviz
+      - name: Render graph to PNG
+        run: dot -Tpng pr_graph.dot -o pr_graph.png
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr-graph-${{ github.event.pull_request.number }}
+          path: pr_graph.png
+      - name: Comment on PR with artifact link
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const runUrl = process.env.GITHUB_SERVER_URL + '/' + context.repo.owner + '/' + context.repo.repo + '/actions/runs/' + process.env.GITHUB_RUN_ID;
+            const body = `Code review graph generated (token-optimized). Artifact: pr-graph-${pr.number}. View Actions run: ${runUrl}`;
+            await github.rest.issues.createComment({owner, repo, issue_number: pr.number, body});

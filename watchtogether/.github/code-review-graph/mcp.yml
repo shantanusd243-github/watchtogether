@@ -1,0 +1,7 @@
+﻿# MCP: Model Control Parameters for code-review-graph
+# token_limit: approximate token budget for analysis (informational)
+# batch_size: how many items to process per batch when needed
+# review_excerpt_length: truncate review bodies to this many chars to reduce tokens
+token_limit: 2000
+batch_size: 50
+review_excerpt_length: 300
