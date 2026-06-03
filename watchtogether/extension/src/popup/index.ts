@@ -5,8 +5,8 @@ import type {
 } from "../types/index";
 
 // Replaced at build time by vite.config.ts `define`.
-declare const __VITE_APP_BASE__: string;
-const APP_BASE = __VITE_APP_BASE__;
+import { APP_BASE, initConfig } from "../config";
+initConfig().catch(() => {});
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function send(msg: InternalMessage): Promise<any> {

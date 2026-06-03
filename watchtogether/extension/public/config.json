@@ -1,0 +1,5 @@
+{
+  "VITE_API_BASE": "https://watch-together-prod.up.railway.app/api",
+  "VITE_WS_BASE": "wss://watch-together-prod.up.railway.app/ws",
+  "VITE_APP_BASE": "https://watchtogether-zeta.vercel.app"
+}

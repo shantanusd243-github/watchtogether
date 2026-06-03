@@ -10,12 +10,9 @@ import type {
 // ─── Config ───────────────────────────────────────────────────────────────────
 // These strings are replaced at build time by vite.config.ts `define`.
 // Change URLs in .env.development / .env.production — never here.
-declare const __VITE_API_BASE__: string;
-declare const __VITE_WS_BASE__: string;
-declare const __VITE_APP_BASE__: string;
-const API_BASE = __VITE_API_BASE__;
-const WS_BASE  = __VITE_WS_BASE__;
-const APP_BASE = __VITE_APP_BASE__;
+import { API_BASE, WS_BASE, APP_BASE, initConfig } from "../config";
+// Load runtime config (overrides build-time defines if extension/public/config.json exists)
+initConfig().catch(() => {});
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let socket: WebSocket | null = null;
