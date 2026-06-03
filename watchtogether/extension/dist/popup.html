@@ -287,6 +287,18 @@
       background: var(--border);
     }
 
+    /* ── Copy hint ── */
+    .copy-hint {
+      background: rgba(78, 205, 196, 0.1);
+      border: 1px solid rgba(78, 205, 196, 0.3);
+      border-radius: 8px;
+      color: var(--accent2);
+      font-size: 11px;
+      font-weight: 600;
+      padding: 8px 10px;
+      text-align: center;
+    }
+
     /* ── Error ── */
     .error-msg {
       background: rgba(255, 71, 87, 0.1);
@@ -379,6 +391,10 @@
           </div>
         </div>
         <div class="room-card-body">
+          <!-- Hint shown only before the movie tab is opened -->
+          <div id="copy-hint" class="copy-hint hidden">
+            📋 Copy the link below and send it to your friend first!
+          </div>
           <div class="modes-row">
             <div class="mode-pill" id="pill-sync">
               <span class="mode-pill-label">Sync</span>
@@ -396,6 +412,8 @@
           <div class="movie-url" id="movie-url-display">—</div>
         </div>
       </div>
+      <!-- Open Movie shown only for the host before tab is opened -->
+      <button class="btn btn-primary hidden" id="btn-open-movie">▶ Open Movie</button>
       <div class="btn-row">
         <button class="btn btn-secondary" id="btn-copy-link">Copy Link</button>
         <button class="btn btn-danger" id="btn-leave">Leave Room</button>

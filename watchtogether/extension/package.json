@@ -4,8 +4,9 @@
   "description": "WatchTogether Chrome Extension",
   "private": true,
   "scripts": {
-    "build": "vite build",
-    "dev": "vite build --watch",
+    "build": "vite build --mode development",
+    "build:prod": "vite build --mode production",
+    "dev": "vite build --watch --mode development",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

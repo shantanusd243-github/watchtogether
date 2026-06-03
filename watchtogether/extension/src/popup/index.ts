@@ -3,8 +3,9 @@ import type {
   ExtensionState,
   RoomState,
 } from "../types/index";
+import { config } from "../config";
 
-const APP_BASE = "http://localhost:5173";
+const { APP_BASE } = config;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function send(msg: InternalMessage): Promise<any> {

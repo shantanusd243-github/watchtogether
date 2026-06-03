@@ -6,11 +6,10 @@ import type {
   CreateRoomResponse,
   JoinRoomResponse,
 } from "../types/index";
+import { config } from "../config";
 
 // ─── Config ───────────────────────────────────────────────────────────────────
-const API_BASE = "http://localhost:8080/api";
-const WS_BASE = "ws://localhost:8080/ws";
-const APP_BASE = "http://localhost:5173";
+const { API_BASE, WS_BASE, APP_BASE } = config;
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let socket: WebSocket | null = null;

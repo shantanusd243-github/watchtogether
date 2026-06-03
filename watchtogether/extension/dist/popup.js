@@ -1,4 +1,4 @@
-const APP_BASE = "https://watchtogether-zeta.vercel.app";
+const APP_BASE = "http://localhost:5173";
 function send(msg) {
   return new Promise((resolve, reject) => {
     chrome.runtime.sendMessage(msg, (response) => {
@@ -48,6 +48,9 @@ function updateRoomUI(state) {
   const shareUrl = `${APP_BASE}/room/${room.roomId}`;
   $("share-url-display").textContent = shareUrl;
   $("movie-url-display").textContent = room.movieUrl ?? "—";
+  const movieNotOpened = !state.activeTabId;
+  $("btn-open-movie").classList.toggle("hidden", !movieNotOpened);
+  $("copy-hint").classList.toggle("hidden", !movieNotOpened);
   const isSynced = room.syncMode === "SYNC";
   const pillSync = $("pill-sync");
   pillSync.classList.toggle("active", isSynced);
@@ -99,6 +102,15 @@ async function joinRoom() {
     showHome();
     showError(e.message ?? "Failed to join room.");
   }
+}
+async function openMovie() {
+  const res = await send({ type: "OPEN_MOVIE" });
+  if (res.error) {
+    showError(res.error);
+    return;
+  }
+  $("btn-open-movie").classList.add("hidden");
+  $("copy-hint").classList.add("hidden");
 }
 async function leaveRoom() {
   showLoading("Leaving…");
@@ -181,6 +193,7 @@ document.addEventListener("DOMContentLoaded", () => {
   $("btn-create").addEventListener("click", createRoom);
   $("btn-join").addEventListener("click", joinRoom);
   $("btn-leave").addEventListener("click", leaveRoom);
+  $("btn-open-movie").addEventListener("click", openMovie);
   $("btn-copy-link").addEventListener("click", copyShareUrl);
   $("copy-btn").addEventListener("click", copyShareUrl);
   $("pill-sync").addEventListener("click", toggleSyncMode);

@@ -1,6 +1,6 @@
-const API_BASE = "https://watch-together-prod.up.railway.app/api";
-const WS_BASE = "wss://watch-together-prod.up.railway.app/ws";
-const APP_BASE = "https://watchtogether-zeta.vercel.app";
+const API_BASE = "http://localhost:8080/api";
+const WS_BASE = "ws://localhost:8080/ws";
+const APP_BASE = "http://localhost:5173";
 let socket = null;
 let reconnectTimer = null;
 let heartbeatTimer = null;
@@ -122,7 +122,9 @@ function startHeartbeat() {
   stopHeartbeat();
   heartbeatTimer = setInterval(() => {
     if (!state.roomState) return;
-    broadcastToContentScript({ type: "GET_STATE" });
+    if (state.roomState.syncMode === "SYNC") {
+      broadcastToContentScript({ type: "GET_STATE" });
+    }
   }, 5e3);
 }
 function stopHeartbeat() {
@@ -241,8 +243,6 @@ async function handleMessage(message, sendResponse) {
         sendResponse({ error: "Failed to create room" });
         return;
       }
-      const tab = await chrome.tabs.create({ url: movieUrl });
-      state.activeTabId = tab.id;
       const roomRes = await fetch(`${API_BASE}/rooms/${result.roomId}`);
       state.roomState = await roomRes.json();
       await saveState();
@@ -252,6 +252,17 @@ async function handleMessage(message, sendResponse) {
         shareUrl: `${APP_BASE}/room/${result.roomId}`
       });
       broadcastToPopup({ type: "STATE_UPDATE", payload: state });
+      break;
+    }
+    case "OPEN_MOVIE": {
+      if (!state.roomState) {
+        sendResponse({ error: "No active room" });
+        return;
+      }
+      const tab = await chrome.tabs.create({ url: state.roomState.movieUrl });
+      state.activeTabId = tab.id;
+      await saveState();
+      sendResponse({ success: true });
       break;
     }
     case "JOIN_ROOM": {
@@ -322,13 +333,10 @@ async function handleMessage(message, sendResponse) {
     case "VIDEO_EVENT": {
       const event = message.payload;
       if (!state.roomState) return;
-      const { controlMode, ownerId, syncMode } = state.roomState;
-      if (controlMode === "OWNER" && state.userId !== ownerId) {
-        return;
-      }
-      if (syncMode === "SYNC") {
-        sendWsEvent({ ...event, userId: state.userId, roomId: state.roomState.roomId });
-      }
+      const { syncMode, controlMode, ownerId } = state.roomState;
+      if (syncMode === "INDEPENDENT") return;
+      if (controlMode === "OWNER" && state.userId !== ownerId) return;
+      sendWsEvent({ ...event, userId: state.userId, roomId: state.roomState.roomId });
       break;
     }
     case "APPLY_REMOTE_EVENT": {

@@ -314,7 +314,13 @@
   </div>
 
   <script type="module">
-    const API_BASE = "https://watch-together-prod.up.railway.app/api";
+    // ── Config — change URLs here only ────────────────────────────────────────
+    const ENV = {
+      API_BASE: "https://watch-together-prod.up.railway.app/api",
+    };
+    // ─────────────────────────────────────────────────────────────────────────
+
+    const { API_BASE } = ENV;
 
     function show(id) {
       ["view-loading", "view-found", "view-notfound", "view-success"].forEach(v => {
