@@ -316,7 +316,10 @@
   <script type="module">
     // ── Config — change URLs here only ────────────────────────────────────────
     const ENV = {
-      API_BASE: "https://watch-together-prod.up.railway.app/api",
+      API_BASE:
+        window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
+          ? "http://localhost:8080/api"
+          : "https://watch-together-prod.up.railway.app/api",
     };
     // ─────────────────────────────────────────────────────────────────────────
 
@@ -330,7 +333,7 @@
     }
 
     // Extract room ID from URL: /room/ABC123
-    const match = window.location.pathname.match(/\/room\/([A-Z0-9]+)/i);
+    const match = window.location.pathname.match(/\/room\/([A-Z0-9]+)\/?$/i);
     const roomId = match ? match[1].toUpperCase() : null;
 
     let roomData = null;

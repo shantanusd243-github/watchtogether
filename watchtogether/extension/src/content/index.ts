@@ -10,10 +10,15 @@ let lastReportedRate = 1;
 const SEEK_DEBOUNCE_MS = 200;
 let seekDebounce: ReturnType<typeof setTimeout> | null = null;
 
-// After a local seek/speed change, suppress heartbeat corrections briefly
-// to prevent ping-pong override loops between users.
+// After a local seek, suppress heartbeat corrections briefly to prevent
+// ping-pong override loops between users.
 const POST_SEEK_SETTLE_MS = 5000;
 let lastLocalSeekAt = 0;
+
+// Suppress outbound events for a short window after remote application so
+// Netflix / HTML5 player callbacks do not bounce the event back to the peer.
+let outboundSuppressedUntil = 0;
+const REMOTE_APPLY_SUPPRESSION_MS = 1500;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function sendToBackground(msg: InternalMessage): void {
@@ -24,75 +29,186 @@ function log(...args: any[]): void {
   console.log("[WatchTogether Content]", ...args);
 }
 
-// ─── Native method cache ──────────────────────────────────────────────────────
-// Grab real setters BEFORE any player framework (Netflix, JWPlayer) overrides them.
-const _currentTimeDesc =
-  Object.getOwnPropertyDescriptor(HTMLVideoElement.prototype, "currentTime") ??
-  Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, "currentTime");
+function shouldIgnoreLocalEvent(): boolean {
+  return isApplyingRemote || Date.now() < outboundSuppressedUntil || !videoEl;
+}
 
-const _playbackRateDesc =
-  Object.getOwnPropertyDescriptor(HTMLVideoElement.prototype, "playbackRate") ??
-  Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, "playbackRate");
+function suppressOutbound(ms = REMOTE_APPLY_SUPPRESSION_MS): void {
+  outboundSuppressedUntil = Math.max(outboundSuppressedUntil, Date.now() + ms);
+}
+
+function isVisibleElement(el: Element): boolean {
+  const node = el as HTMLElement;
+  const rect = node.getBoundingClientRect();
+  const style = getComputedStyle(node);
+  return (
+    rect.width > 0 &&
+    rect.height > 0 &&
+    style.display !== "none" &&
+    style.visibility !== "hidden" &&
+    style.opacity !== "0"
+  );
+}
+
+function dispatchKeyboardSequence(doc: Document, key: string, code: string): void {
+  const target = (doc.activeElement as HTMLElement | null) ?? doc.body ?? doc.documentElement;
+  if (!target) return;
+
+  const init: KeyboardEventInit = {
+    key,
+    code,
+    bubbles: true,
+    cancelable: true,
+    composed: true,
+  };
+
+  target.dispatchEvent(new KeyboardEvent("keydown", init));
+  target.dispatchEvent(new KeyboardEvent("keypress", init));
+  target.dispatchEvent(new KeyboardEvent("keyup", init));
+}
+
+function findClickableControl(doc: Document, kind: "play" | "pause"): HTMLElement | null {
+  const keywords = kind === "play" ? ["play", "resume"] : ["pause"];
+  const candidates = Array.from(
+    doc.querySelectorAll<HTMLElement>(
+      "button, [role='button'], [aria-label], [title], [data-uia]"
+    )
+  );
+
+  for (const el of candidates) {
+    const label = [
+      el.getAttribute("aria-label") ?? "",
+      el.getAttribute("title") ?? "",
+      el.getAttribute("data-uia") ?? "",
+      el.textContent ?? "",
+    ]
+      .join(" ")
+      .toLowerCase();
+
+    if (!keywords.some((k) => label.includes(k))) continue;
+    if (!isVisibleElement(el)) continue;
+    return el;
+  }
+
+  return null;
+}
+
+function clickFallbackControl(video: HTMLVideoElement, kind: "play" | "pause"): boolean {
+  const doc = video.ownerDocument;
+  const control = findClickableControl(doc, kind);
+  if (control) {
+    control.click();
+    return true;
+  }
+  return false;
+}
+
+function getVideoRootDocuments(): Document[] {
+  const docs: Document[] = [document];
+
+  try {
+    for (const frame of Array.from(window.frames)) {
+      try {
+        if (frame.document && !docs.includes(frame.document)) {
+          docs.push(frame.document);
+        }
+      } catch {
+        // Cross-origin iframe — ignore.
+      }
+    }
+  } catch {
+    // no frames
+  }
+
+  return docs;
+}
+
+function collectVideosFromRoot(root: ParentNode): HTMLVideoElement[] {
+  const videos = Array.from(root.querySelectorAll<HTMLVideoElement>("video"));
+
+  for (const el of Array.from(root.querySelectorAll<HTMLElement>("*"))) {
+    if (el.shadowRoot) {
+      videos.push(...collectVideosFromRoot(el.shadowRoot));
+    }
+  }
+
+  return videos;
+}
 
 function nativeSetCurrentTime(video: HTMLVideoElement, t: number): void {
-  if (_currentTimeDesc?.set) {
-    _currentTimeDesc.set.call(video, t);
+  const desc =
+    Object.getOwnPropertyDescriptor(HTMLVideoElement.prototype, "currentTime") ??
+    Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, "currentTime");
+
+  if (desc?.set) {
+    desc.set.call(video, t);
   } else {
     video.currentTime = t;
   }
 }
 
 function nativeSetPlaybackRate(video: HTMLVideoElement, r: number): void {
-  if (_playbackRateDesc?.set) {
-    _playbackRateDesc.set.call(video, r);
+  const desc =
+    Object.getOwnPropertyDescriptor(HTMLVideoElement.prototype, "playbackRate") ??
+    Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, "playbackRate");
+
+  if (desc?.set) {
+    desc.set.call(video, r);
   } else {
     video.playbackRate = r;
   }
 }
 
 // Netflix and some players block programmatic play()/pause() from extensions.
-// Dispatching a Space keydown on document.body triggers the player's own handler.
-// We try native first; if it throws or the state doesn't change, fall back to key.
+// We try the native call first, then fall back to visible player controls and
+// keyboard shortcuts.
 async function nativePlay(video: HTMLVideoElement): Promise<void> {
   if (!video.paused) return;
+
   try {
     await video.play();
-    // Give it 200ms; if still paused, use keyboard fallback
     await new Promise((r) => setTimeout(r, 200));
-    if (video.paused) throw new Error("still paused");
+    if (!video.paused) return;
   } catch {
-    log("play() blocked — using Space key fallback");
-    video.ownerDocument.body.dispatchEvent(
-      new KeyboardEvent("keydown", { key: " ", code: "Space", keyCode: 32, bubbles: true })
-    );
+    // fall through to fallbacks
   }
+
+  log("play() blocked — trying player-control fallback");
+  if (clickFallbackControl(video, "play")) {
+    await new Promise((r) => setTimeout(r, 150));
+    if (!video.paused) return;
+  }
+
+  dispatchKeyboardSequence(video.ownerDocument, " ", "Space");
 }
 
 function nativePause(video: HTMLVideoElement): void {
   if (video.paused) return;
-  video.pause();
-  // Give it 100ms; if still playing, use keyboard fallback
+
+  try {
+    video.pause();
+  } catch {
+    // fall through to fallbacks
+  }
+
   setTimeout(() => {
-    if (!video.paused) {
-      log("pause() blocked — using Space key fallback");
-      video.ownerDocument.body.dispatchEvent(
-        new KeyboardEvent("keydown", { key: " ", code: "Space", keyCode: 32, bubbles: true })
-      );
+    if (video.paused) return;
+
+    log("pause() blocked — trying player-control fallback");
+    if (clickFallbackControl(video, "pause")) {
+      return;
     }
+
+    dispatchKeyboardSequence(video.ownerDocument, " ", "Space");
   }, 100);
 }
 
 // ─── Video Detection ──────────────────────────────────────────────────────────
 function findVideo(): HTMLVideoElement | null {
-  const docs: Document[] = [document];
-  try {
-    for (const frame of Array.from(window.frames)) {
-      try { docs.push(frame.document); } catch { /* cross-origin iframe — skip */ }
-    }
-  } catch { /* no frames */ }
+  const docs = getVideoRootDocuments();
 
   for (const doc of docs) {
-    const videos = Array.from(doc.querySelectorAll<HTMLVideoElement>("video"));
+    const videos = collectVideosFromRoot(doc);
     if (!videos.length) continue;
 
     const best =
@@ -104,6 +220,7 @@ function findVideo(): HTMLVideoElement | null {
 
     if (best) return best;
   }
+
   return null;
 }
 
@@ -119,6 +236,10 @@ function startDetection(): void {
 function attachListeners(video: HTMLVideoElement): void {
   if (videoEl) detachListeners();
   videoEl = video;
+  lastReportedTime = video.currentTime;
+  lastReportedPlaying = !video.paused;
+  lastReportedRate = video.playbackRate;
+
   log("✅ Attached to video — src:", video.src || video.currentSrc || "(blob)");
 
   video.addEventListener("play", onPlay);
@@ -140,48 +261,58 @@ function detachListeners(): void {
 
 // ─── Local Event Handlers ─────────────────────────────────────────────────────
 function onPlay(): void {
-  if (isApplyingRemote) return;
+  if (shouldIgnoreLocalEvent()) return;
   if (!videoEl) return;
+
   log("Local PLAY at", videoEl.currentTime);
   sendToBackground({
     type: "VIDEO_EVENT",
     payload: { type: "PLAY", currentTime: videoEl.currentTime, playing: true } as Partial<WatchEvent>,
   });
   lastReportedPlaying = true;
+  lastReportedTime = videoEl.currentTime;
 }
 
 function onPause(): void {
-  if (isApplyingRemote) return;
+  if (shouldIgnoreLocalEvent()) return;
   if (!videoEl) return;
   if (videoEl.seeking) return; // transient pause during seek — ignore
+
   log("Local PAUSE at", videoEl.currentTime);
   sendToBackground({
     type: "VIDEO_EVENT",
     payload: { type: "PAUSE", currentTime: videoEl.currentTime, playing: false } as Partial<WatchEvent>,
   });
   lastReportedPlaying = false;
+  lastReportedTime = videoEl.currentTime;
 }
 
 function onSeeking(): void {
-  if (isApplyingRemote) return;
+  if (shouldIgnoreLocalEvent()) return;
   if (!videoEl) return;
-  lastLocalSeekAt = Date.now(); // arm the settle window
+
+  lastLocalSeekAt = Date.now();
   if (seekDebounce) clearTimeout(seekDebounce);
+
   seekDebounce = setTimeout(() => {
-    if (!videoEl) return;
+    if (!videoEl || shouldIgnoreLocalEvent()) return;
+
     log("Local SEEK to", videoEl.currentTime);
     sendToBackground({
       type: "VIDEO_EVENT",
       payload: { type: "SEEK", currentTime: videoEl.currentTime, playing: !videoEl.paused } as Partial<WatchEvent>,
     });
+    lastReportedTime = videoEl.currentTime;
   }, SEEK_DEBOUNCE_MS);
 }
 
 function onRateChange(): void {
-  if (isApplyingRemote) return;
+  if (shouldIgnoreLocalEvent()) return;
   if (!videoEl) return;
+
   const rate = videoEl.playbackRate;
-  if (rate === lastReportedRate) return;
+  if (Math.abs(rate - lastReportedRate) < 0.01) return;
+
   lastReportedRate = rate;
   log("Local SPEED change to", rate);
   sendToBackground({
@@ -207,6 +338,8 @@ async function applyRemoteEvent(event: WatchEvent): Promise<void> {
   }
 
   isApplyingRemote = true;
+  suppressOutbound();
+
   try {
     switch (event.type) {
       case "PLAY": {
@@ -245,8 +378,6 @@ async function applyRemoteEvent(event: WatchEvent): Promise<void> {
       case "HEARTBEAT": {
         if (event.currentTime === undefined) break;
 
-        // Suppress corrections during the settle window after a local seek.
-        // This is what breaks the ping-pong override loop.
         const msSinceLocalSeek = Date.now() - lastLocalSeekAt;
         if (msSinceLocalSeek < POST_SEEK_SETTLE_MS) {
           log(`Heartbeat suppressed — ${msSinceLocalSeek}ms since local seek, still settling`);
@@ -259,7 +390,7 @@ async function applyRemoteEvent(event: WatchEvent): Promise<void> {
           nativeSetCurrentTime(videoEl, event.currentTime);
         }
 
-        if (event.playbackRate !== undefined && videoEl.playbackRate !== event.playbackRate) {
+        if (event.playbackRate !== undefined && Math.abs(videoEl.playbackRate - event.playbackRate) > 0.01) {
           nativeSetPlaybackRate(videoEl, event.playbackRate);
         }
 
@@ -271,17 +402,20 @@ async function applyRemoteEvent(event: WatchEvent): Promise<void> {
       }
     }
   } finally {
-    setTimeout(() => { isApplyingRemote = false; }, 300);
+    setTimeout(() => {
+      isApplyingRemote = false;
+    }, 100);
   }
 }
 
 // ─── Current State Reporter ───────────────────────────────────────────────────
-function getCurrentState(): { currentTime: number; playing: boolean; playbackRate: number } {
-  if (!videoEl) return { currentTime: 0, playing: false, playbackRate: 1 };
+function getCurrentState(): { currentTime: number; playing: boolean; playbackRate: number; hasVideo: boolean } {
+  if (!videoEl) return { currentTime: 0, playing: false, playbackRate: 1, hasVideo: false };
   return {
     currentTime: videoEl.currentTime,
     playing: !videoEl.paused,
     playbackRate: videoEl.playbackRate,
+    hasVideo: true,
   };
 }
 
@@ -295,17 +429,31 @@ chrome.runtime.onMessage.addListener(
         sendResponse({ ok: true });
         break;
 
-      case "GET_STATE":
+      case "GET_STATE": {
         const s = getCurrentState();
         log("📤 Reporting state:", s);
         sendToBackground({ type: "APPLY_REMOTE_EVENT", payload: s });
         sendResponse(s);
         break;
+      }
 
-      case "TRIGGER_JOIN":
-        sendToBackground({ type: "JOIN_ROOM", payload: { roomId: message.payload.roomId } });
+      case "TRIGGER_JOIN": {
+        // Only let the top frame trigger the join flow to avoid duplicate joins
+        // when the script is injected into multiple frames.
+        if (window.top !== window) {
+          sendResponse({ ok: true });
+          break;
+        }
+        sendToBackground({
+          type: "JOIN_ROOM",
+          payload: {
+            roomId: message.payload.roomId,
+            sourceTabId: message.payload.sourceTabId,
+          },
+        });
         sendResponse({ ok: true });
         break;
+      }
 
       default:
         sendResponse({ ok: false, error: "Unknown type" });
@@ -326,6 +474,9 @@ const observer = new MutationObserver(() => {
   const found = findVideo();
   if (found && found !== videoEl) attachListeners(found);
 });
-observer.observe(document.body, { childList: true, subtree: true });
+
+if (document.body) {
+  observer.observe(document.body, { childList: true, subtree: true });
+}
 
 log("Content script initialized on", window.location.href);

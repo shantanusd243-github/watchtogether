@@ -1,13 +1,9 @@
-// Centralized runtime config for extension
-// Exports mutable bindings that can be overridden by a runtime config.json
+// Centralized runtime config for extension.
+// All URLs are loaded from config.json at runtime — no hardcoded values.
 
-declare const __VITE_API_BASE__: string | undefined;
-declare const __VITE_WS_BASE__: string | undefined;
-declare const __VITE_APP_BASE__: string | undefined;
-
-export let API_BASE: string = typeof __VITE_API_BASE__ !== 'undefined' ? __VITE_API_BASE__ : 'http://localhost:8080/api';
-export let WS_BASE: string  = typeof __VITE_WS_BASE__ !== 'undefined' ? __VITE_WS_BASE__ : 'ws://localhost:8080/ws';
-export let APP_BASE: string = typeof __VITE_APP_BASE__ !== 'undefined' ? __VITE_APP_BASE__ : 'http://localhost:5173';
+export let API_BASE: string = '';
+export let WS_BASE: string  = '';
+export let APP_BASE: string = '';
 
 export async function initConfig(): Promise<void> {
   try {

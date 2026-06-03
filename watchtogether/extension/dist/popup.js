@@ -1,4 +1,4 @@
-const APP_BASE = "https://watchtogether-zeta.vercel.app";
+import { i as initConfig, a as APP_BASE } from "./config.js";
 function send(msg) {
   return new Promise((resolve, reject) => {
     chrome.runtime.sendMessage(msg, (response) => {
@@ -189,7 +189,8 @@ function armLoadingWatchdog() {
     }
   }, 4e3);
 }
-document.addEventListener("DOMContentLoaded", () => {
+document.addEventListener("DOMContentLoaded", async () => {
+  await initConfig();
   $("btn-create").addEventListener("click", createRoom);
   $("btn-join").addEventListener("click", joinRoom);
   $("btn-leave").addEventListener("click", leaveRoom);

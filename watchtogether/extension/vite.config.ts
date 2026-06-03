@@ -1,18 +1,13 @@
 import { defineConfig, loadEnv } from "vite";
 import { resolve } from "path";
-import { copyFileSync, mkdirSync } from "fs";
+import { copyFileSync, mkdirSync, writeFileSync } from "fs";
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "VITE_");
 
   return {
-    // Inject env vars as compile-time constants so they get inlined
-    // into each bundle — no runtime chunk imports which break extensions.
-    define: {
-      "__VITE_API_BASE__": JSON.stringify(env.VITE_API_BASE ?? "http://localhost:8080/api"),
-      "__VITE_WS_BASE__":  JSON.stringify(env.VITE_WS_BASE  ?? "ws://localhost:8080/ws"),
-      "__VITE_APP_BASE__": JSON.stringify(env.VITE_APP_BASE  ?? "http://localhost:5173"),
-    },
+    // URLs must be loaded from config.json at runtime, not baked into the build.
+    // This ensures no production values are hardcoded in the source.
     build: {
       outDir: "dist",
       emptyOutDir: true,
@@ -43,7 +38,24 @@ export default defineConfig(({ mode }) => {
         name: "copy-public",
         closeBundle() {
           copyFileSync(resolve(__dirname, "public/manifest.json"), resolve(__dirname, "dist/manifest.json"));
-          copyFileSync(resolve(__dirname, "public/popup.html"),    resolve(__dirname, "dist/popup.html"));
+          copyFileSync(resolve(__dirname, "public/popup.html"), resolve(__dirname, "dist/popup.html"));
+
+          const runtimeConfig = {
+            VITE_API_BASE: env.VITE_API_BASE ?? (mode === "development"
+              ? "http://localhost:8080/api"
+              : "https://watch-together-prod.up.railway.app/api"),
+            VITE_WS_BASE: env.VITE_WS_BASE ?? (mode === "development"
+              ? "ws://localhost:8080/ws"
+              : "wss://watch-together-prod.up.railway.app/ws"),
+            VITE_APP_BASE: env.VITE_APP_BASE ?? (mode === "development"
+              ? "http://localhost:5173"
+              : "https://watchtogether-zeta.vercel.app"),
+          };
+          writeFileSync(
+            resolve(__dirname, "dist/config.json"),
+            JSON.stringify(runtimeConfig, null, 2)
+          );
+
           try { mkdirSync(resolve(__dirname, "dist/icons")); } catch {}
           console.log("✅ Extension assets copied to dist/");
         },

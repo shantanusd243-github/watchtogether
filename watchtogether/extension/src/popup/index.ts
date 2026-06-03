@@ -1,12 +1,10 @@
 import type {
   InternalMessage,
   ExtensionState,
-  RoomState,
 } from "../types/index";
 
-// Replaced at build time by vite.config.ts `define`.
+// URLs are loaded from config.json at runtime — no hardcoded values here.
 import { APP_BASE, initConfig } from "../config";
-initConfig().catch(() => {});
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function send(msg: InternalMessage): Promise<any> {
@@ -241,7 +239,10 @@ function armLoadingWatchdog(): void {
   }, 4000);
 }
 
-document.addEventListener("DOMContentLoaded", () => {
+document.addEventListener("DOMContentLoaded", async () => {
+  // Load runtime config first (all URLs come from config.json, not code)
+  await initConfig();
+
   $("btn-create").addEventListener("click", createRoom);
   $("btn-join").addEventListener("click", joinRoom);
   $("btn-leave").addEventListener("click", leaveRoom);

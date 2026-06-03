@@ -8,6 +8,8 @@ const SEEK_DEBOUNCE_MS = 200;
 let seekDebounce = null;
 const POST_SEEK_SETTLE_MS = 5e3;
 let lastLocalSeekAt = 0;
+let outboundSuppressedUntil = 0;
+const REMOTE_APPLY_SUPPRESSION_MS = 1500;
 function sendToBackground(msg) {
   chrome.runtime.sendMessage(msg).catch(() => {
   });
@@ -15,18 +17,97 @@ function sendToBackground(msg) {
 function log(...args) {
   console.log("[WatchTogether Content]", ...args);
 }
-const _currentTimeDesc = Object.getOwnPropertyDescriptor(HTMLVideoElement.prototype, "currentTime") ?? Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, "currentTime");
-const _playbackRateDesc = Object.getOwnPropertyDescriptor(HTMLVideoElement.prototype, "playbackRate") ?? Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, "playbackRate");
+function shouldIgnoreLocalEvent() {
+  return isApplyingRemote || Date.now() < outboundSuppressedUntil || !videoEl;
+}
+function suppressOutbound(ms = REMOTE_APPLY_SUPPRESSION_MS) {
+  outboundSuppressedUntil = Math.max(outboundSuppressedUntil, Date.now() + ms);
+}
+function isVisibleElement(el) {
+  const node = el;
+  const rect = node.getBoundingClientRect();
+  const style = getComputedStyle(node);
+  return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden" && style.opacity !== "0";
+}
+function dispatchKeyboardSequence(doc, key, code) {
+  const target = doc.activeElement ?? doc.body ?? doc.documentElement;
+  if (!target) return;
+  const init = {
+    key,
+    code,
+    bubbles: true,
+    cancelable: true,
+    composed: true
+  };
+  target.dispatchEvent(new KeyboardEvent("keydown", init));
+  target.dispatchEvent(new KeyboardEvent("keypress", init));
+  target.dispatchEvent(new KeyboardEvent("keyup", init));
+}
+function findClickableControl(doc, kind) {
+  const keywords = kind === "play" ? ["play", "resume"] : ["pause"];
+  const candidates = Array.from(
+    doc.querySelectorAll(
+      "button, [role='button'], [aria-label], [title], [data-uia]"
+    )
+  );
+  for (const el of candidates) {
+    const label = [
+      el.getAttribute("aria-label") ?? "",
+      el.getAttribute("title") ?? "",
+      el.getAttribute("data-uia") ?? "",
+      el.textContent ?? ""
+    ].join(" ").toLowerCase();
+    if (!keywords.some((k) => label.includes(k))) continue;
+    if (!isVisibleElement(el)) continue;
+    return el;
+  }
+  return null;
+}
+function clickFallbackControl(video, kind) {
+  const doc = video.ownerDocument;
+  const control = findClickableControl(doc, kind);
+  if (control) {
+    control.click();
+    return true;
+  }
+  return false;
+}
+function getVideoRootDocuments() {
+  const docs = [document];
+  try {
+    for (const frame of Array.from(window.frames)) {
+      try {
+        if (frame.document && !docs.includes(frame.document)) {
+          docs.push(frame.document);
+        }
+      } catch {
+      }
+    }
+  } catch {
+  }
+  return docs;
+}
+function collectVideosFromRoot(root) {
+  const videos = Array.from(root.querySelectorAll("video"));
+  for (const el of Array.from(root.querySelectorAll("*"))) {
+    if (el.shadowRoot) {
+      videos.push(...collectVideosFromRoot(el.shadowRoot));
+    }
+  }
+  return videos;
+}
 function nativeSetCurrentTime(video, t) {
-  if (_currentTimeDesc?.set) {
-    _currentTimeDesc.set.call(video, t);
+  const desc = Object.getOwnPropertyDescriptor(HTMLVideoElement.prototype, "currentTime") ?? Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, "currentTime");
+  if (desc?.set) {
+    desc.set.call(video, t);
   } else {
     video.currentTime = t;
   }
 }
 function nativeSetPlaybackRate(video, r) {
-  if (_playbackRateDesc?.set) {
-    _playbackRateDesc.set.call(video, r);
+  const desc = Object.getOwnPropertyDescriptor(HTMLVideoElement.prototype, "playbackRate") ?? Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, "playbackRate");
+  if (desc?.set) {
+    desc.set.call(video, r);
   } else {
     video.playbackRate = r;
   }
@@ -36,39 +117,35 @@ async function nativePlay(video) {
   try {
     await video.play();
     await new Promise((r) => setTimeout(r, 200));
-    if (video.paused) throw new Error("still paused");
+    if (!video.paused) return;
   } catch {
-    log("play() blocked — using Space key fallback");
-    video.ownerDocument.body.dispatchEvent(
-      new KeyboardEvent("keydown", { key: " ", code: "Space", keyCode: 32, bubbles: true })
-    );
   }
+  log("play() blocked — trying player-control fallback");
+  if (clickFallbackControl(video, "play")) {
+    await new Promise((r) => setTimeout(r, 150));
+    if (!video.paused) return;
+  }
+  dispatchKeyboardSequence(video.ownerDocument, " ", "Space");
 }
 function nativePause(video) {
   if (video.paused) return;
-  video.pause();
+  try {
+    video.pause();
+  } catch {
+  }
   setTimeout(() => {
-    if (!video.paused) {
-      log("pause() blocked — using Space key fallback");
-      video.ownerDocument.body.dispatchEvent(
-        new KeyboardEvent("keydown", { key: " ", code: "Space", keyCode: 32, bubbles: true })
-      );
+    if (video.paused) return;
+    log("pause() blocked — trying player-control fallback");
+    if (clickFallbackControl(video, "pause")) {
+      return;
     }
+    dispatchKeyboardSequence(video.ownerDocument, " ", "Space");
   }, 100);
 }
 function findVideo() {
-  const docs = [document];
-  try {
-    for (const frame of Array.from(window.frames)) {
-      try {
-        docs.push(frame.document);
-      } catch {
-      }
-    }
-  } catch {
-  }
+  const docs = getVideoRootDocuments();
   for (const doc of docs) {
-    const videos = Array.from(doc.querySelectorAll("video"));
+    const videos = collectVideosFromRoot(doc);
     if (!videos.length) continue;
     const best = videos.find((v) => v.readyState >= 2 && !v.paused || v.currentTime > 0) || videos.find((v) => v.readyState >= 2) || videos.find((v) => v.readyState >= 1) || videos.find((v) => v.src !== "" || v.currentSrc !== "") || videos[0];
     if (best) return best;
@@ -85,6 +162,9 @@ function startDetection() {
 function attachListeners(video) {
   if (videoEl) detachListeners();
   videoEl = video;
+  lastReportedTime = video.currentTime;
+  lastReportedPlaying = !video.paused;
+  lastReportedRate = video.playbackRate;
   log("✅ Attached to video — src:", video.src || video.currentSrc || "(blob)");
   video.addEventListener("play", onPlay);
   video.addEventListener("pause", onPause);
@@ -102,7 +182,7 @@ function detachListeners() {
   videoEl = null;
 }
 function onPlay() {
-  if (isApplyingRemote) return;
+  if (shouldIgnoreLocalEvent()) return;
   if (!videoEl) return;
   log("Local PLAY at", videoEl.currentTime);
   sendToBackground({
@@ -110,9 +190,10 @@ function onPlay() {
     payload: { type: "PLAY", currentTime: videoEl.currentTime, playing: true }
   });
   lastReportedPlaying = true;
+  lastReportedTime = videoEl.currentTime;
 }
 function onPause() {
-  if (isApplyingRemote) return;
+  if (shouldIgnoreLocalEvent()) return;
   if (!videoEl) return;
   if (videoEl.seeking) return;
   log("Local PAUSE at", videoEl.currentTime);
@@ -121,26 +202,28 @@ function onPause() {
     payload: { type: "PAUSE", currentTime: videoEl.currentTime, playing: false }
   });
   lastReportedPlaying = false;
+  lastReportedTime = videoEl.currentTime;
 }
 function onSeeking() {
-  if (isApplyingRemote) return;
+  if (shouldIgnoreLocalEvent()) return;
   if (!videoEl) return;
   lastLocalSeekAt = Date.now();
   if (seekDebounce) clearTimeout(seekDebounce);
   seekDebounce = setTimeout(() => {
-    if (!videoEl) return;
+    if (!videoEl || shouldIgnoreLocalEvent()) return;
     log("Local SEEK to", videoEl.currentTime);
     sendToBackground({
       type: "VIDEO_EVENT",
       payload: { type: "SEEK", currentTime: videoEl.currentTime, playing: !videoEl.paused }
     });
+    lastReportedTime = videoEl.currentTime;
   }, SEEK_DEBOUNCE_MS);
 }
 function onRateChange() {
-  if (isApplyingRemote) return;
+  if (shouldIgnoreLocalEvent()) return;
   if (!videoEl) return;
   const rate = videoEl.playbackRate;
-  if (rate === lastReportedRate) return;
+  if (Math.abs(rate - lastReportedRate) < 0.01) return;
   lastReportedRate = rate;
   log("Local SPEED change to", rate);
   sendToBackground({
@@ -162,6 +245,7 @@ async function applyRemoteEvent(event) {
     return;
   }
   isApplyingRemote = true;
+  suppressOutbound();
   try {
     switch (event.type) {
       case "PLAY": {
@@ -205,7 +289,7 @@ async function applyRemoteEvent(event) {
           log(`Heartbeat drift ${diff.toFixed(2)}s — correcting`);
           nativeSetCurrentTime(videoEl, event.currentTime);
         }
-        if (event.playbackRate !== void 0 && videoEl.playbackRate !== event.playbackRate) {
+        if (event.playbackRate !== void 0 && Math.abs(videoEl.playbackRate - event.playbackRate) > 0.01) {
           nativeSetPlaybackRate(videoEl, event.playbackRate);
         }
         if (event.playing !== void 0) {
@@ -218,15 +302,16 @@ async function applyRemoteEvent(event) {
   } finally {
     setTimeout(() => {
       isApplyingRemote = false;
-    }, 300);
+    }, 100);
   }
 }
 function getCurrentState() {
-  if (!videoEl) return { currentTime: 0, playing: false, playbackRate: 1 };
+  if (!videoEl) return { currentTime: 0, playing: false, playbackRate: 1, hasVideo: false };
   return {
     currentTime: videoEl.currentTime,
     playing: !videoEl.paused,
-    playbackRate: videoEl.playbackRate
+    playbackRate: videoEl.playbackRate,
+    hasVideo: true
   };
 }
 chrome.runtime.onMessage.addListener(
@@ -237,16 +322,28 @@ chrome.runtime.onMessage.addListener(
         applyRemoteEvent(message.payload);
         sendResponse({ ok: true });
         break;
-      case "GET_STATE":
+      case "GET_STATE": {
         const s = getCurrentState();
         log("📤 Reporting state:", s);
         sendToBackground({ type: "APPLY_REMOTE_EVENT", payload: s });
         sendResponse(s);
         break;
-      case "TRIGGER_JOIN":
-        sendToBackground({ type: "JOIN_ROOM", payload: { roomId: message.payload.roomId } });
+      }
+      case "TRIGGER_JOIN": {
+        if (window.top !== window) {
+          sendResponse({ ok: true });
+          break;
+        }
+        sendToBackground({
+          type: "JOIN_ROOM",
+          payload: {
+            roomId: message.payload.roomId,
+            sourceTabId: message.payload.sourceTabId
+          }
+        });
         sendResponse({ ok: true });
         break;
+      }
       default:
         sendResponse({ ok: false, error: "Unknown type" });
     }
@@ -263,6 +360,8 @@ const observer = new MutationObserver(() => {
   const found = findVideo();
   if (found && found !== videoEl) attachListeners(found);
 });
-observer.observe(document.body, { childList: true, subtree: true });
+if (document.body) {
+  observer.observe(document.body, { childList: true, subtree: true });
+}
 log("Content script initialized on", window.location.href);
 //# sourceMappingURL=content.js.map

@@ -22,6 +22,7 @@ export interface WatchEvent {
   currentTime?: number;
   playing?: boolean;
   playbackRate?: number;
+  hasVideo?: boolean;
   syncMode?: SyncMode;
   controlMode?: ControlMode;
   movieUrl?: string;
@@ -60,6 +61,7 @@ export type InternalMessageType =
   | "LEAVE_ROOM"
   | "OPEN_MOVIE"
   | "GET_STATE"
+  | "TRIGGER_JOIN"
   | "TOGGLE_SYNC_MODE"
   | "TOGGLE_CONTROL_MODE"
   | "VIDEO_EVENT"

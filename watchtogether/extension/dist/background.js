@@ -1,6 +1,4 @@
-const API_BASE = "https://watch-together-prod.up.railway.app/api";
-const WS_BASE = "wss://watch-together-prod.up.railway.app/ws";
-const APP_BASE = "https://watchtogether-zeta.vercel.app";
+import { A as API_BASE, a as APP_BASE, i as initConfig, W as WS_BASE } from "./config.js";
 let socket = null;
 let reconnectTimer = null;
 let heartbeatTimer = null;
@@ -21,17 +19,20 @@ async function loadState() {
   const stored = await chrome.storage.local.get([
     "userId",
     "roomState",
-    "activeTabId"
+    "activeTabId",
+    "activeFrameId"
   ]);
   if (stored.userId) state.userId = stored.userId;
   if (stored.roomState) state.roomState = stored.roomState;
-  if (stored.activeTabId) state.activeTabId = stored.activeTabId;
+  if (stored.activeTabId !== void 0) state.activeTabId = stored.activeTabId;
+  if (stored.activeFrameId !== void 0) state.activeFrameId = stored.activeFrameId;
 }
 async function saveState() {
   await chrome.storage.local.set({
     userId: state.userId,
     roomState: state.roomState,
-    activeTabId: state.activeTabId
+    activeTabId: state.activeTabId,
+    activeFrameId: state.activeFrameId ?? 0
   });
 }
 function broadcastToPopup(msg) {
@@ -39,10 +40,13 @@ function broadcastToPopup(msg) {
   });
 }
 function broadcastToContentScript(msg) {
-  if (state.activeTabId) {
-    chrome.tabs.sendMessage(state.activeTabId, msg, { frameId: state.activeFrameId ?? 0 }).catch(() => {
-    });
-  }
+  if (state.activeTabId === void 0) return;
+  chrome.tabs.sendMessage(
+    state.activeTabId,
+    msg,
+    { frameId: state.activeFrameId ?? 0 }
+  ).catch(() => {
+  });
 }
 function connectWebSocket(roomId) {
   if (socket && socket.readyState === WebSocket.OPEN) return;
@@ -151,6 +155,7 @@ function handleRemoteEvent(event) {
     case "PLAY":
     case "PAUSE":
     case "SEEK":
+    case "SPEED":
       if (state.roomState.syncMode === "SYNC") {
         broadcastToContentScript({ type: "APPLY_REMOTE_EVENT", payload: event });
       }
@@ -207,8 +212,9 @@ async function resetLocalState() {
   disconnectWebSocket();
   state.roomState = null;
   state.activeTabId = void 0;
+  state.activeFrameId = 0;
   reconnectAttempts = 0;
-  await chrome.storage.local.remove(["roomState", "activeTabId"]);
+  await chrome.storage.local.remove(["roomState", "activeTabId", "activeFrameId"]);
   broadcastToPopup({ type: "STATE_UPDATE", payload: state });
 }
 async function leaveRoom() {
@@ -261,20 +267,32 @@ async function handleMessage(message, sendResponse) {
       }
       const tab = await chrome.tabs.create({ url: state.roomState.movieUrl });
       state.activeTabId = tab.id;
+      state.activeFrameId = 0;
       await saveState();
       sendResponse({ success: true });
       break;
     }
     case "JOIN_ROOM": {
-      const { roomId } = message.payload;
+      const { roomId, sourceTabId } = message.payload || {};
       const result = await joinRoom(roomId);
       if (!result) {
         sendResponse({ error: "Failed to join room" });
         return;
       }
-      const tab = await chrome.tabs.create({ url: result.roomState.movieUrl });
-      state.activeTabId = tab.id;
       state.roomState = result.roomState;
+      state.activeFrameId = 0;
+      if (sourceTabId) {
+        try {
+          const updated = await chrome.tabs.update(sourceTabId, { url: result.roomState.movieUrl });
+          state.activeTabId = updated?.id ?? sourceTabId;
+        } catch {
+          const tab = await chrome.tabs.create({ url: result.roomState.movieUrl });
+          state.activeTabId = tab.id;
+        }
+      } else {
+        const tab = await chrome.tabs.create({ url: result.roomState.movieUrl });
+        state.activeTabId = tab.id;
+      }
       await saveState();
       connectWebSocket(roomId);
       sendResponse({ success: true, roomState: result.roomState });
@@ -340,14 +358,16 @@ async function handleMessage(message, sendResponse) {
       break;
     }
     case "APPLY_REMOTE_EVENT": {
-      const { currentTime, playing } = message.payload;
+      const { currentTime, playing, playbackRate, hasVideo } = message.payload || {};
       if (!state.roomState) return;
+      if (hasVideo === false) return;
       sendWsEvent({
         roomId: state.roomState.roomId,
         userId: state.userId,
         type: "HEARTBEAT",
         currentTime,
-        playing
+        playing,
+        playbackRate
       });
       break;
     }
@@ -357,20 +377,22 @@ async function handleMessage(message, sendResponse) {
 }
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (changeInfo.status === "complete" && tab.url) {
-    const match = tab.url.match(/\/room\/([A-Z0-9]+)$/);
+    const match = tab.url.match(/\/room\/([A-Z0-9]+)\/?$/i);
     if (match) {
-      const roomId = match[1];
+      const roomId = match[1].toUpperCase();
       if (!state.roomState || state.roomState.roomId !== roomId) {
         chrome.tabs.sendMessage(tabId, {
           type: "TRIGGER_JOIN",
-          payload: { roomId }
+          payload: { roomId, sourceTabId: tabId }
         }).catch(() => {
         });
       }
     }
   }
 });
-loadState().then(async () => {
+(async () => {
+  await initConfig();
+  await loadState();
   if (!state.roomState) return;
   try {
     const res = await fetch(`${API_BASE}/rooms/${state.roomState.roomId}`);
@@ -383,5 +405,5 @@ loadState().then(async () => {
   } catch {
     console.warn("[WatchTogether] Server unreachable at startup, state preserved");
   }
-});
+})();
 //# sourceMappingURL=background.js.map

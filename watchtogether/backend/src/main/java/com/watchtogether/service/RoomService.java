@@ -15,7 +15,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public class RoomService {
 
     private static final long ROOM_EXPIRY_MS = 6 * 60 * 60 * 1000L; // 6 hours
-    private static final long PARTICIPANT_STALE_MS = 30_000L;         // 30 seconds
+    private static final long PARTICIPANT_STALE_MS = 2 * 60 * 60 * 1000L; // 2 hours
 
     private final Map<String, Room> rooms = new ConcurrentHashMap<>();
 
