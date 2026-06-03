@@ -7,6 +7,7 @@ export type EventType =
   | "PLAY"
   | "PAUSE"
   | "SEEK"
+  | "SPEED"
   | "MODE_CHANGE"
   | "HEARTBEAT"
   | "JOIN"
@@ -20,6 +21,7 @@ export interface WatchEvent {
   type: EventType;
   currentTime?: number;
   playing?: boolean;
+  playbackRate?: number;
   syncMode?: SyncMode;
   controlMode?: ControlMode;
   movieUrl?: string;
@@ -56,6 +58,7 @@ export type InternalMessageType =
   | "CREATE_ROOM"
   | "JOIN_ROOM"
   | "LEAVE_ROOM"
+  | "OPEN_MOVIE"
   | "GET_STATE"
   | "TOGGLE_SYNC_MODE"
   | "TOGGLE_CONTROL_MODE"

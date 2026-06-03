@@ -66,6 +66,11 @@ function updateRoomUI(state: ExtensionState): void {
   ($("share-url-display") as HTMLElement).textContent = shareUrl;
   ($("movie-url-display") as HTMLElement).textContent = room.movieUrl ?? "—";
 
+  // Show "Open Movie" button + hint only if the movie tab hasn't been opened yet
+  const movieNotOpened = !state.activeTabId;
+  $("btn-open-movie").classList.toggle("hidden", !movieNotOpened);
+  $("copy-hint").classList.toggle("hidden", !movieNotOpened);
+
   // Sync mode pill
   const isSynced = room.syncMode === "SYNC";
   const pillSync = $("pill-sync");
@@ -130,6 +135,14 @@ async function joinRoom(): Promise<void> {
     showHome();
     showError(e.message ?? "Failed to join room.");
   }
+}
+
+async function openMovie(): Promise<void> {
+  const res = await send({ type: "OPEN_MOVIE" });
+  if (res.error) { showError(res.error); return; }
+  // Hide the button immediately — tab is now open
+  $("btn-open-movie").classList.add("hidden");
+  $("copy-hint").classList.add("hidden");
 }
 
 async function leaveRoom(): Promise<void> {
@@ -230,6 +243,7 @@ document.addEventListener("DOMContentLoaded", () => {
   $("btn-create").addEventListener("click", createRoom);
   $("btn-join").addEventListener("click", joinRoom);
   $("btn-leave").addEventListener("click", leaveRoom);
+  $("btn-open-movie").addEventListener("click", openMovie);
   $("btn-copy-link").addEventListener("click", copyShareUrl);
   $("copy-btn").addEventListener("click", copyShareUrl);
   $("pill-sync").addEventListener("click", toggleSyncMode);

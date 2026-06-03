@@ -168,8 +168,11 @@ function startHeartbeat(): void {
   stopHeartbeat();
   heartbeatTimer = setInterval(() => {
     if (!state.roomState) return;
-    // Request current time from content script
-    broadcastToContentScript({ type: "GET_STATE" });
+    // Only poll content script in SYNC mode — no point sending heartbeats
+    // when independent, and it prevents accidental cross-user corrections.
+    if (state.roomState.syncMode === "SYNC") {
+      broadcastToContentScript({ type: "GET_STATE" });
+    }
   }, 5000);
 }
 
@@ -326,11 +329,10 @@ async function handleMessage(
         sendResponse({ error: "Failed to create room" });
         return;
       }
-      // Open movie URL in new tab
-      const tab = await chrome.tabs.create({ url: movieUrl });
-      state.activeTabId = tab.id;
 
-      // Fetch full room state
+      // Fetch full room state but DON'T open the tab yet.
+      // The popup stays open so the user can copy the share link.
+      // Tab opens when user clicks "Open Movie" (OPEN_MOVIE message).
       const roomRes = await fetch(`${API_BASE}/rooms/${result.roomId}`);
       state.roomState = await roomRes.json();
       await saveState();
@@ -341,6 +343,19 @@ async function handleMessage(
         shareUrl: `${APP_BASE}/room/${result.roomId}`,
       });
       broadcastToPopup({ type: "STATE_UPDATE", payload: state });
+      break;
+    }
+
+    case "OPEN_MOVIE": {
+      // User clicked "Open Movie" after copying the share link
+      if (!state.roomState) {
+        sendResponse({ error: "No active room" });
+        return;
+      }
+      const tab = await chrome.tabs.create({ url: state.roomState.movieUrl });
+      state.activeTabId = tab.id;
+      await saveState();
+      sendResponse({ success: true });
       break;
     }
 
@@ -420,20 +435,18 @@ async function handleMessage(
     }
 
     case "VIDEO_EVENT": {
-      // Forwarded from content script
       const event: WatchEvent = message.payload;
       if (!state.roomState) return;
 
-      // Check control mode permissions
-      const { controlMode, ownerId, syncMode } = state.roomState;
-      if (controlMode === "OWNER" && state.userId !== ownerId) {
-        // Non-owners cannot broadcast in owner mode
-        return;
-      }
+      const { syncMode, controlMode, ownerId } = state.roomState;
 
-      if (syncMode === "SYNC") {
-        sendWsEvent({ ...event, userId: state.userId, roomId: state.roomState.roomId });
-      }
+      // INDEPENDENT mode — local actions stay local, full stop.
+      if (syncMode === "INDEPENDENT") return;
+
+      // OWNER control mode — only the owner may broadcast playback events.
+      if (controlMode === "OWNER" && state.userId !== ownerId) return;
+
+      sendWsEvent({ ...event, userId: state.userId, roomId: state.roomState.roomId });
       break;
     }
 
