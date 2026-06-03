@@ -147,7 +147,7 @@ public class WatchTogetherWebSocketHandler implements WebSocketHandler {
         Room room = roomOpt.get();
 
         switch (event.getType()) {
-            case PLAY, PAUSE, SEEK -> {
+            case PLAY, PAUSE, SEEK, SPEED -> {
                 // In OWNER control mode, only owner can broadcast these
                 if (room.getControlMode() == Room.ControlMode.OWNER
                     && !room.getOwnerId().equals(userId)) {

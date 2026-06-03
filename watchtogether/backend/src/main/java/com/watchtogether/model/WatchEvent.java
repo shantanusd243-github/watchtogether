@@ -18,6 +18,7 @@ public class WatchEvent {
     private EventType type;
     private Double currentTime;
     private Boolean playing;
+    private Double playbackRate;
     private Room.SyncMode syncMode;
     private Room.ControlMode controlMode;
     private String movieUrl;
@@ -27,6 +28,7 @@ public class WatchEvent {
         PLAY,
         PAUSE,
         SEEK,
+        SPEED,
         MODE_CHANGE,
         HEARTBEAT,
         JOIN,
