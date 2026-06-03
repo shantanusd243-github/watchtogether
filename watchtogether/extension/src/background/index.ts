@@ -6,10 +6,16 @@ import type {
   CreateRoomResponse,
   JoinRoomResponse,
 } from "../types/index";
-import { config } from "../config";
 
 // ─── Config ───────────────────────────────────────────────────────────────────
-const { API_BASE, WS_BASE, APP_BASE } = config;
+// These strings are replaced at build time by vite.config.ts `define`.
+// Change URLs in .env.development / .env.production — never here.
+declare const __VITE_API_BASE__: string;
+declare const __VITE_WS_BASE__: string;
+declare const __VITE_APP_BASE__: string;
+const API_BASE = __VITE_API_BASE__;
+const WS_BASE  = __VITE_WS_BASE__;
+const APP_BASE = __VITE_APP_BASE__;
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let socket: WebSocket | null = null;
