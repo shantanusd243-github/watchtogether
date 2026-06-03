@@ -1,4 +1,4 @@
-const APP_BASE = "http://localhost:5173";
+const APP_BASE = "https://watchtogether-zeta.vercel.app";
 function send(msg) {
   return new Promise((resolve, reject) => {
     chrome.runtime.sendMessage(msg, (response) => {
