@@ -19,10 +19,27 @@ public class WatchEvent {
     private Double currentTime;
     private Boolean playing;
     private Double playbackRate;
+    private Boolean hasVideo;
     private Room.SyncMode syncMode;
     private Room.ControlMode controlMode;
     private String movieUrl;
     private Long timestamp;
+    private ChatMessage chat;
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @Builder
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public static class ChatMessage {
+        private String id;
+        private String roomId;
+        private String userId;
+        private String displayName;
+        private String text;
+        private boolean gif;
+        private long timestamp;
+    }
 
     public enum EventType {
         PLAY,
@@ -34,6 +51,7 @@ public class WatchEvent {
         JOIN,
         LEAVE,
         OWNER_CHANGE,
-        ROOM_STATE
+        ROOM_STATE,
+        CHAT_MESSAGE
     }
 }

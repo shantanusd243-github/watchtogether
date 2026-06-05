@@ -210,6 +210,7 @@ async function refreshState(): Promise<void> {
   try {
     const res = await send({ type: "GET_STATE" });
     const extState: ExtensionState = res.state;
+    if (extState.userId) currentUserId = extState.userId;
     if (extState.roomState) {
       showRoom(extState);
     } else {
@@ -239,22 +240,143 @@ function armLoadingWatchdog(): void {
   }, 4000);
 }
 
+// ─── Chat ─────────────────────────────────────────────────────────────────────
+import type { ChatMessage } from "../types/index";
+
+let currentUserId = "";
+
+function appendChatMessage(msg: ChatMessage): void {
+  const msgs = $("chat-messages");
+  if (!msgs) return;
+  const isMine = msg.userId === currentUserId;
+  const row = document.createElement("div");
+  row.style.cssText = `display:flex;flex-direction:column;gap:2px;align-items:${isMine ? "flex-end" : "flex-start"};`;
+  if (!isMine) {
+    const name = document.createElement("div");
+    name.className = "chat-msg-name";
+    name.textContent = msg.displayName;
+    row.appendChild(name);
+  }
+  const body = document.createElement("div");
+  body.className = `chat-msg-body${isMine ? " chat-msg-mine" : ""}`;
+  if (msg.isGif) {
+    const img = document.createElement("img");
+    img.src = msg.text;
+    img.style.cssText = "max-width:180px;max-height:120px;border-radius:8px;display:block;";
+    body.appendChild(img);
+  } else {
+    body.textContent = msg.text;
+  }
+  row.appendChild(body);
+  msgs.appendChild(row);
+  msgs.scrollTop = msgs.scrollHeight;
+  // Red dot badge when not on chat tab
+  const chatBtn = $("tab-chat-btn");
+  if (chatBtn && !chatBtn.classList.contains("active") && !isMine) {
+    chatBtn.textContent = "💬 Chat 🔴";
+  }
+}
+
+async function sendChat(): Promise<void> {
+  const input = $("chat-input") as HTMLInputElement;
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = "";
+  await send({ type: "SEND_CHAT", payload: { text, isGif: false } });
+}
+
+async function searchGif(): Promise<void> {
+  const q = ($("gif-search-input") as HTMLInputElement).value.trim();
+  if (!q) return;
+  const results = $("gif-results");
+  results.style.display = "flex";
+  results.innerHTML = "<span style='color:var(--muted);font-size:11px;padding:4px;'>Searching…</span>";
+  try {
+    const r = await fetch(`https://tenor.googleapis.com/v2/search?q=${encodeURIComponent(q)}&key=AIzaSyAyimkuYQYF_FXVALexPmHA2zHg1GiRRH8&limit=8&media_filter=gif`);
+    const data = await r.json();
+    results.innerHTML = "";
+    (data.results || []).forEach((res: any) => {
+      const url = res.media_formats?.gif?.url || res.media_formats?.tinygif?.url;
+      if (!url) return;
+      const img = document.createElement("img");
+      img.src = url;
+      img.style.cssText = "width:72px;height:54px;object-fit:cover;border-radius:6px;cursor:pointer;";
+      img.addEventListener("click", async () => {
+        await send({ type: "SEND_CHAT", payload: { text: url, isGif: true } });
+        results.style.display = "none";
+        ($("gif-search-input") as HTMLInputElement).value = "";
+      });
+      results.appendChild(img);
+    });
+    if (!results.children.length) results.innerHTML = "<span style='color:var(--muted);font-size:11px;'>No results</span>";
+  } catch {
+    results.innerHTML = "<span style='color:var(--danger);font-size:11px;'>Search failed</span>";
+  }
+}
+
+function switchTab(tab: "room" | "chat"): void {
+  const roomActions = $("room-actions");
+  const viewChat = $("view-chat");
+  const roomBtn = $("tab-room-btn");
+  const chatBtn = $("tab-chat-btn");
+  const roomCard = document.querySelector(".room-card") as HTMLElement | null;
+  const copyHint = document.getElementById("copy-hint");
+  const openMovieBtn = document.getElementById("btn-open-movie");
+  if (tab === "room") {
+    roomActions.classList.remove("hidden");
+    viewChat.style.display = "none";
+    roomBtn.classList.add("active");
+    chatBtn.classList.remove("active");
+    chatBtn.textContent = "💬 Chat";
+    if (roomCard) roomCard.style.display = "";
+    if (copyHint) copyHint.classList.remove("hidden");
+    if (openMovieBtn) openMovieBtn.classList.remove("hidden");
+    // re-apply state to restore correct visibility
+    send({ type: "GET_STATE" }).then((res) => { if (res?.state?.roomState) updateRoomUI(res.state); });
+  } else {
+    roomActions.classList.add("hidden");
+    viewChat.style.display = "flex";
+    chatBtn.classList.add("active");
+    chatBtn.textContent = "💬 Chat";
+    roomBtn.classList.remove("active");
+    if (roomCard) roomCard.style.display = "none";
+    if (copyHint) copyHint.classList.add("hidden");
+    if (openMovieBtn) openMovieBtn.classList.add("hidden");
+    const msgs = $("chat-messages");
+    if (msgs) msgs.scrollTop = msgs.scrollHeight;
+  }
+}
+
+// Incoming chat from background (other user's message)
+chrome.runtime.onMessage.addListener((message: import("../types/index").InternalMessage) => {
+  if (message.type === "CHAT_RECEIVED") {
+    appendChatMessage(message.payload as ChatMessage);
+  }
+});
+
 document.addEventListener("DOMContentLoaded", async () => {
-  // Load runtime config first (all URLs come from config.json, not code)
   await initConfig();
 
   $("btn-create").addEventListener("click", createRoom);
   $("btn-join").addEventListener("click", joinRoom);
   $("btn-leave").addEventListener("click", leaveRoom);
+  $("btn-leave-chat").addEventListener("click", leaveRoom);
   $("btn-open-movie").addEventListener("click", openMovie);
   $("btn-copy-link").addEventListener("click", copyShareUrl);
   $("copy-btn").addEventListener("click", copyShareUrl);
   $("pill-sync").addEventListener("click", toggleSyncMode);
   $("pill-control").addEventListener("click", toggleControlMode);
+  $("tab-room-btn").addEventListener("click", () => switchTab("room"));
+  $("tab-chat-btn").addEventListener("click", () => switchTab("chat"));
+  $("chat-send-btn").addEventListener("click", sendChat);
+  $("gif-search-btn").addEventListener("click", searchGif);
+  $("chat-input").addEventListener("keydown", (e) => { if ((e as KeyboardEvent).key === "Enter") sendChat(); });
+  $("gif-search-input").addEventListener("keydown", (e) => { if ((e as KeyboardEvent).key === "Enter") searchGif(); });
   $("join-room-id").addEventListener("input", (e) => {
-    (e.target as HTMLInputElement).value = (
-      e.target as HTMLInputElement
-    ).value.toUpperCase();
+    (e.target as HTMLInputElement).value = (e.target as HTMLInputElement).value.toUpperCase();
   });
+
+  const state = await send({ type: "GET_STATE" }).catch(() => null);
+  if (state?.state?.userId) currentUserId = state.state.userId;
   refreshState();
 });

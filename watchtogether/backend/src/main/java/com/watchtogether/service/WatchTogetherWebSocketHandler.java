@@ -184,6 +184,11 @@ public class WatchTogetherWebSocketHandler implements WebSocketHandler {
                 broadcastToRoom(roomId, event, null); // broadcast to ALL including sender
             }
 
+            case CHAT_MESSAGE -> {
+                // Chat goes to everyone in the room including sender
+                broadcastToRoom(roomId, event, null);
+            }
+
             default -> log.debug("Unhandled event type: {}", event.getType());
         }
     }

@@ -12,7 +12,19 @@ export type EventType =
   | "HEARTBEAT"
   | "JOIN"
   | "LEAVE"
-  | "OWNER_CHANGE";
+  | "OWNER_CHANGE"
+  | "CHAT_MESSAGE";
+
+// ─── Chat ─────────────────────────────────────────────────────────────────────
+export interface ChatMessage {
+  id: string;           // unique per message
+  roomId: string;
+  userId: string;
+  displayName: string;  // e.g. "User A3F2"
+  text: string;         // plain text, emoji, or gif URL
+  isGif: boolean;
+  timestamp: number;
+}
 
 // ─── WebSocket Messages ───────────────────────────────────────────────────────
 export interface WatchEvent {
@@ -27,6 +39,8 @@ export interface WatchEvent {
   controlMode?: ControlMode;
   movieUrl?: string;
   timestamp?: number;
+  // Chat fields
+  chat?: ChatMessage;
 }
 
 export interface HeartbeatEvent extends WatchEvent {
@@ -71,6 +85,8 @@ export type InternalMessageType =
   | "STATE_UPDATE"
   | "WS_CONNECTED"
   | "WS_DISCONNECTED"
+  | "SEND_CHAT"
+  | "CHAT_RECEIVED"
   | "ERROR";
 
 export interface InternalMessage {

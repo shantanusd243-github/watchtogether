@@ -247,6 +247,9 @@ function attachListeners(video: HTMLVideoElement): void {
   video.addEventListener("seeking", onSeeking);
   video.addEventListener("ratechange", onRateChange);
   video.addEventListener("timeupdate", onTimeUpdate);
+
+  // Inject floating chat button once video is found
+  maybeInjectUI();
 }
 
 function detachListeners(): void {
@@ -455,12 +458,283 @@ chrome.runtime.onMessage.addListener(
         break;
       }
 
+      case "CHAT_RECEIVED": {
+        const msg = message.payload as import("../types/index").ChatMessage;
+        showChatOverlay(msg);
+        sendResponse({ ok: true });
+        break;
+      }
+
       default:
         sendResponse({ ok: false, error: "Unknown type" });
     }
     return true;
   }
 );
+
+// ─── Chat Overlay & Floating Button ──────────────────────────────────────────
+
+let overlayContainer: HTMLDivElement | null = null;
+let chatPanelEl: HTMLDivElement | null = null;
+let chatPanelVisible = false;
+const OVERLAY_Z = "2147483640";
+
+function ensureOverlayContainer(): HTMLDivElement {
+  if (overlayContainer && overlayContainer.isConnected) return overlayContainer;
+  overlayContainer = document.createElement("div");
+  overlayContainer.id = "__wt_overlay__";
+  overlayContainer.style.cssText = `
+    position: fixed; bottom: 80px; left: 20px;
+    z-index: ${OVERLAY_Z}; pointer-events: none;
+    display: flex; flex-direction: column; gap: 8px;
+    max-width: 320px;
+  `;
+  document.documentElement.appendChild(overlayContainer);
+  return overlayContainer;
+}
+
+function showChatOverlay(msg: import("../types/index").ChatMessage): void {
+  const container = ensureOverlayContainer();
+  const bubble = document.createElement("div");
+  bubble.style.cssText = `
+    background: rgba(10,10,20,0.82);
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(124,106,247,0.35);
+    border-radius: 12px;
+    padding: 8px 12px;
+    color: #e8e8f0;
+    font-family: system-ui, sans-serif;
+    font-size: 13px;
+    line-height: 1.4;
+    pointer-events: none;
+    animation: __wt_fadein__ 0.2s ease-out;
+    max-width: 300px;
+    word-break: break-word;
+  `;
+
+  const nameEl = document.createElement("span");
+  nameEl.style.cssText = "font-weight:700;color:#4ecdc4;margin-right:6px;font-size:11px;";
+  nameEl.textContent = msg.displayName + ":";
+
+  const bodyEl = document.createElement("span");
+  if (msg.isGif) {
+    const img = document.createElement("img");
+    img.src = msg.text;
+    img.style.cssText = "max-width:200px;max-height:120px;border-radius:8px;display:block;margin-top:4px;";
+    bubble.appendChild(nameEl);
+    bubble.appendChild(img);
+  } else {
+    bodyEl.textContent = msg.text;
+    bubble.appendChild(nameEl);
+    bubble.appendChild(bodyEl);
+  }
+
+  // Inject keyframes once
+  if (!document.getElementById("__wt_styles__")) {
+    const style = document.createElement("style");
+    style.id = "__wt_styles__";
+    style.textContent = `
+      @keyframes __wt_fadein__ { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
+      @keyframes __wt_fadeout__ { from{opacity:1} to{opacity:0} }
+    `;
+    document.head.appendChild(style);
+  }
+
+  container.appendChild(bubble);
+  setTimeout(() => {
+    bubble.style.animation = "__wt_fadeout__ 0.4s ease-out forwards";
+    setTimeout(() => bubble.remove(), 400);
+  }, 4000);
+}
+
+function buildChatPanel(): HTMLDivElement {
+  const panel = document.createElement("div");
+  panel.id = "__wt_chat_panel__";
+  panel.style.cssText = `
+    position: fixed; bottom: 80px; right: 20px;
+    width: 300px; height: 380px;
+    background: rgba(10,10,20,0.92);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(124,106,247,0.4);
+    border-radius: 16px;
+    z-index: ${OVERLAY_Z};
+    display: flex; flex-direction: column;
+    font-family: system-ui, sans-serif;
+    overflow: hidden;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+  `;
+
+  // Header
+  const header = document.createElement("div");
+  header.style.cssText = "padding:12px 14px;border-bottom:1px solid rgba(255,255,255,0.08);display:flex;align-items:center;justify-content:space-between;";
+  header.innerHTML = `<span style="color:#e8e8f0;font-weight:700;font-size:13px;">💬 Room Chat</span>`;
+  const closeBtn = document.createElement("button");
+  closeBtn.textContent = "✕";
+  closeBtn.style.cssText = "background:none;border:none;color:#6060a0;cursor:pointer;font-size:14px;padding:2px 4px;";
+  closeBtn.addEventListener("click", () => toggleChatPanel());
+  header.appendChild(closeBtn);
+  panel.appendChild(header);
+
+  // Messages area
+  const msgs = document.createElement("div");
+  msgs.id = "__wt_chat_msgs__";
+  msgs.style.cssText = "flex:1;overflow-y:auto;padding:10px 12px;display:flex;flex-direction:column;gap:8px;";
+  panel.appendChild(msgs);
+
+  // GIF search row
+  const gifRow = document.createElement("div");
+  gifRow.style.cssText = "padding:6px 10px;border-top:1px solid rgba(255,255,255,0.06);display:flex;gap:6px;";
+  const gifInput = document.createElement("input");
+  gifInput.placeholder = "Search GIF…";
+  gifInput.style.cssText = "flex:1;background:rgba(255,255,255,0.07);border:1px solid rgba(255,255,255,0.12);border-radius:8px;padding:5px 8px;color:#e8e8f0;font-size:11px;outline:none;";
+  const gifBtn = document.createElement("button");
+  gifBtn.textContent = "GIF";
+  gifBtn.style.cssText = "background:rgba(124,106,247,0.3);border:1px solid rgba(124,106,247,0.5);border-radius:8px;color:#a99fff;cursor:pointer;font-size:11px;font-weight:700;padding:4px 8px;";
+  gifRow.appendChild(gifInput);
+  gifRow.appendChild(gifBtn);
+  panel.appendChild(gifRow);
+
+  // GIF results area (hidden by default)
+  const gifResults = document.createElement("div");
+  gifResults.id = "__wt_gif_results__";
+  gifResults.style.cssText = "display:none;padding:6px 10px;max-height:100px;overflow-y:auto;display:none;flex-wrap:wrap;gap:4px;border-top:1px solid rgba(255,255,255,0.06);";
+  panel.appendChild(gifResults);
+
+  // Input row
+  const inputRow = document.createElement("div");
+  inputRow.style.cssText = "padding:8px 10px;border-top:1px solid rgba(255,255,255,0.08);display:flex;gap:6px;align-items:center;";
+  const textInput = document.createElement("input");
+  textInput.id = "__wt_chat_input__";
+  textInput.placeholder = "Message or emoji…";
+  textInput.style.cssText = "flex:1;background:rgba(255,255,255,0.07);border:1px solid rgba(255,255,255,0.12);border-radius:10px;padding:8px 10px;color:#e8e8f0;font-size:13px;outline:none;";
+  const sendBtn = document.createElement("button");
+  sendBtn.textContent = "➤";
+  sendBtn.style.cssText = "background:linear-gradient(135deg,#7c6af7,#4ecdc4);border:none;border-radius:10px;color:#fff;cursor:pointer;font-size:14px;padding:7px 10px;";
+  inputRow.appendChild(textInput);
+  inputRow.appendChild(sendBtn);
+  panel.appendChild(inputRow);
+
+  // Send on Enter or button click
+  const doSend = () => {
+    const text = textInput.value.trim();
+    if (!text) return;
+    sendToBackground({ type: "SEND_CHAT", payload: { text, isGif: false } });
+    textInput.value = "";
+  };
+  sendBtn.addEventListener("click", doSend);
+  textInput.addEventListener("keydown", (e) => { if (e.key === "Enter") doSend(); });
+
+  // GIF search via Tenor (free, no key needed for basic usage)
+  gifBtn.addEventListener("click", async () => {
+    const q = gifInput.value.trim();
+    if (!q) return;
+    gifResults.style.display = "flex";
+    gifResults.innerHTML = "<span style='color:#6060a0;font-size:11px;padding:4px;'>Searching…</span>";
+    try {
+      const res = await fetch(`https://tenor.googleapis.com/v2/search?q=${encodeURIComponent(q)}&key=AIzaSyAyimkuYQYF_FXVALexPmHA2zHg1GiRRH8&limit=8&media_filter=gif`);
+      const data = await res.json();
+      gifResults.innerHTML = "";
+      (data.results || []).forEach((r: any) => {
+        const url = r.media_formats?.gif?.url || r.media_formats?.tinygif?.url;
+        if (!url) return;
+        const img = document.createElement("img");
+        img.src = url;
+        img.style.cssText = "width:80px;height:60px;object-fit:cover;border-radius:6px;cursor:pointer;border:2px solid transparent;";
+        img.addEventListener("click", () => {
+          sendToBackground({ type: "SEND_CHAT", payload: { text: url, isGif: true } });
+          gifResults.style.display = "none";
+          gifInput.value = "";
+        });
+        gifResults.appendChild(img);
+      });
+      if (!gifResults.children.length) gifResults.innerHTML = "<span style='color:#6060a0;font-size:11px;padding:4px;'>No results</span>";
+    } catch {
+      gifResults.innerHTML = "<span style='color:#ff4757;font-size:11px;padding:4px;'>Search failed</span>";
+    }
+  });
+
+  return panel;
+}
+
+function appendMessageToPanel(msg: import("../types/index").ChatMessage): void {
+  const msgs = document.getElementById("__wt_chat_msgs__");
+  if (!msgs) return;
+
+  const row = document.createElement("div");
+  row.style.cssText = "display:flex;flex-direction:column;gap:2px;";
+
+  const nameEl = document.createElement("span");
+  nameEl.style.cssText = "font-size:10px;font-weight:700;color:#4ecdc4;";
+  nameEl.textContent = msg.displayName;
+
+  const bodyEl = document.createElement("div");
+  bodyEl.style.cssText = "background:rgba(255,255,255,0.06);border-radius:10px;padding:6px 10px;max-width:240px;word-break:break-word;color:#e8e8f0;font-size:12px;";
+
+  if (msg.isGif) {
+    const img = document.createElement("img");
+    img.src = msg.text;
+    img.style.cssText = "max-width:200px;max-height:130px;border-radius:8px;display:block;";
+    bodyEl.appendChild(img);
+  } else {
+    bodyEl.textContent = msg.text;
+  }
+
+  row.appendChild(nameEl);
+  row.appendChild(bodyEl);
+  msgs.appendChild(row);
+  msgs.scrollTop = msgs.scrollHeight;
+}
+
+function toggleChatPanel(): void {
+  if (chatPanelVisible) {
+    chatPanelEl?.remove();
+    chatPanelVisible = false;
+  } else {
+    chatPanelEl = buildChatPanel();
+    document.documentElement.appendChild(chatPanelEl);
+    chatPanelVisible = true;
+  }
+}
+
+// Floating chat button — injected into the page
+function injectFloatingButton(): void {
+  if (document.getElementById("__wt_fab__")) return;
+  const fab = document.createElement("button");
+  fab.id = "__wt_fab__";
+  fab.title = "WatchTogether Chat";
+  fab.innerHTML = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>`;
+  fab.style.cssText = `
+    position: fixed; bottom: 20px; right: 20px;
+    width: 48px; height: 48px;
+    background: linear-gradient(135deg, #7c6af7, #4ecdc4);
+    border: none; border-radius: 50%; cursor: pointer;
+    z-index: ${OVERLAY_Z};
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 4px 16px rgba(124,106,247,0.5);
+    transition: transform 0.15s;
+  `;
+  fab.addEventListener("mouseenter", () => { fab.style.transform = "scale(1.1)"; });
+  fab.addEventListener("mouseleave", () => { fab.style.transform = "scale(1)"; });
+  fab.addEventListener("click", toggleChatPanel);
+  document.documentElement.appendChild(fab);
+}
+
+// Also handle incoming chat messages in the panel
+const _origOnMessage = chrome.runtime.onMessage;
+chrome.runtime.onMessage.addListener(
+  (message: import("../types/index").InternalMessage) => {
+    if (message.type === "CHAT_RECEIVED") {
+      appendMessageToPanel(message.payload);
+    }
+  }
+);
+
+// Inject button once we know there's a room (background sends CHAT_RECEIVED or APPLY_REMOTE_EVENT)
+// Simple approach: inject after video is found
+function maybeInjectUI(): void {
+  injectFloatingButton();
+  ensureOverlayContainer();
+}
 
 // ─── Init ─────────────────────────────────────────────────────────────────────
 const initialVideo = findVideo();
