@@ -160,6 +160,12 @@ function handleRemoteEvent(event) {
         broadcastToContentScript({ type: "APPLY_REMOTE_EVENT", payload: event });
       }
       break;
+    case "CHAT_MESSAGE":
+      if (event.chat) {
+        broadcastToPopup({ type: "CHAT_RECEIVED", payload: event.chat });
+        broadcastToContentScript({ type: "CHAT_RECEIVED", payload: event.chat });
+      }
+      break;
   }
 }
 async function refreshRoomState(roomId) {
@@ -346,6 +352,33 @@ async function handleMessage(message, sendResponse) {
       });
       sendResponse({ controlMode: newControl });
       broadcastToPopup({ type: "STATE_UPDATE", payload: state });
+      break;
+    }
+    case "SEND_CHAT": {
+      if (!state.roomState) {
+        sendResponse({ error: "No active room" });
+        return;
+      }
+      const { text, isGif } = message.payload;
+      const shortId = state.userId.replace("user_", "").toUpperCase().slice(0, 4);
+      const chatMsg = {
+        id: Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
+        roomId: state.roomState.roomId,
+        userId: state.userId,
+        displayName: `User ${shortId}`,
+        text,
+        isGif: !!isGif,
+        timestamp: Date.now()
+      };
+      broadcastToPopup({ type: "CHAT_RECEIVED", payload: chatMsg });
+      broadcastToContentScript({ type: "CHAT_RECEIVED", payload: chatMsg });
+      sendWsEvent({
+        roomId: state.roomState.roomId,
+        userId: state.userId,
+        type: "CHAT_MESSAGE",
+        chat: chatMsg
+      });
+      sendResponse({ ok: true });
       break;
     }
     case "VIDEO_EVENT": {
