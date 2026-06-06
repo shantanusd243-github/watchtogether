@@ -13,7 +13,8 @@ export type EventType =
   | "JOIN"
   | "LEAVE"
   | "OWNER_CHANGE"
-  | "CHAT_MESSAGE";
+  | "CHAT_MESSAGE"
+  | "UPDATE_URL";
 
 // ─── Chat ─────────────────────────────────────────────────────────────────────
 export interface ChatMessage {
@@ -74,6 +75,7 @@ export type InternalMessageType =
   | "JOIN_ROOM"
   | "LEAVE_ROOM"
   | "OPEN_MOVIE"
+  | "UPDATE_ROOM_URL"
   | "GET_STATE"
   | "TRIGGER_JOIN"
   | "TOGGLE_SYNC_MODE"

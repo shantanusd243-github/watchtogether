@@ -52,6 +52,7 @@ public class WatchEvent {
         LEAVE,
         OWNER_CHANGE,
         ROOM_STATE,
-        CHAT_MESSAGE
+        CHAT_MESSAGE,
+        UPDATE_URL
     }
 }

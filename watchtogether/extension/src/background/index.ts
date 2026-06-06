@@ -194,7 +194,10 @@ function handleRemoteEvent(event: WatchEvent): void {
 
     case "JOIN":
     case "LEAVE":
-      refreshRoomState(state.roomState.roomId);
+      // Delay slightly so the joining participant's REST /join call
+      // has time to complete on the server before we fetch room state.
+      // Without this the host fetches before the participant count updates.
+      setTimeout(() => refreshRoomState(state.roomState!.roomId), 800);
       break;
 
     case "HEARTBEAT":
@@ -204,6 +207,19 @@ function handleRemoteEvent(event: WatchEvent): void {
     case "SPEED":
       if (state.roomState.syncMode === "SYNC") {
         broadcastToContentScript({ type: "APPLY_REMOTE_EVENT", payload: event });
+      }
+      break;
+
+    case "UPDATE_URL":
+      // Another participant changed the video URL — update local state and navigate
+      if (event.movieUrl && state.roomState) {
+        state.roomState.movieUrl = event.movieUrl;
+        saveState();
+        broadcastToPopup({ type: "STATE_UPDATE", payload: state });
+        // Navigate the active tab to the new URL
+        if (state.activeTabId) {
+          chrome.tabs.update(state.activeTabId, { url: event.movieUrl }).catch(() => {});
+        }
       }
       break;
 
@@ -462,6 +478,29 @@ async function handleMessage(
         type: "CHAT_MESSAGE",
         chat: chatMsg,
       });
+      sendResponse({ ok: true });
+      break;
+    }
+
+    case "UPDATE_ROOM_URL": {
+      if (!state.roomState) { sendResponse({ error: "No active room" }); return; }
+      const { movieUrl } = message.payload;
+      if (!movieUrl) { sendResponse({ error: "No URL provided" }); return; }
+      // Update local state
+      state.roomState.movieUrl = movieUrl;
+      await saveState();
+      // Broadcast to all participants including self
+      sendWsEvent({
+        roomId: state.roomState.roomId,
+        userId: state.userId,
+        type: "UPDATE_URL",
+        movieUrl,
+      });
+      // Navigate own tab
+      if (state.activeTabId) {
+        chrome.tabs.update(state.activeTabId, { url: movieUrl }).catch(() => {});
+      }
+      broadcastToPopup({ type: "STATE_UPDATE", payload: state });
       sendResponse({ ok: true });
       break;
     }

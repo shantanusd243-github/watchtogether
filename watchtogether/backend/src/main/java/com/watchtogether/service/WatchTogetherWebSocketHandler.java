@@ -184,6 +184,14 @@ public class WatchTogetherWebSocketHandler implements WebSocketHandler {
                 broadcastToRoom(roomId, event, null); // broadcast to ALL including sender
             }
 
+            case UPDATE_URL -> {
+                // Any participant can update the URL
+                if (event.getMovieUrl() != null && !event.getMovieUrl().isBlank()) {
+                    roomService.setMovieUrl(roomId, event.getMovieUrl());
+                    broadcastToRoom(roomId, event, null); // broadcast to ALL including sender
+                }
+            }
+
             case CHAT_MESSAGE -> {
                 // Chat goes to everyone in the room including sender
                 broadcastToRoom(roomId, event, null);

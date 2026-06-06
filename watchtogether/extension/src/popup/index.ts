@@ -354,6 +354,127 @@ chrome.runtime.onMessage.addListener((message: import("../types/index").Internal
   }
 });
 
+// ─── Update Room URL ──────────────────────────────────────────────────────────
+function initUpdateUrl(): void {
+  const btn = document.getElementById("btn-update-url");
+  const row = document.getElementById("update-url-row");
+  const confirmBtn = document.getElementById("btn-confirm-url");
+  const input = document.getElementById("new-url-input") as HTMLInputElement;
+  if (!btn || !row || !confirmBtn || !input) return;
+
+  btn.addEventListener("click", () => {
+    row.classList.toggle("hidden");
+    if (!row.classList.contains("hidden")) input.focus();
+  });
+
+  const doUpdate = async () => {
+    const url = input.value.trim();
+    if (!url) return;
+    try { new URL(url); } catch { showError("Invalid URL"); return; }
+    const res = await send({ type: "UPDATE_ROOM_URL", payload: { movieUrl: url } });
+    if (res.error) { showError(res.error); return; }
+    input.value = "";
+    row.classList.add("hidden");
+  };
+
+  confirmBtn.addEventListener("click", doUpdate);
+  input.addEventListener("keydown", (e) => { if ((e as KeyboardEvent).key === "Enter") doUpdate(); });
+}
+
+// ─── Voice Chat ───────────────────────────────────────────────────────────────
+type SpeechRecognitionType = typeof window extends { SpeechRecognition: infer T } ? T : any;
+let recognition: any = null;
+let voiceMode = false;
+let voiceSendTimer: ReturnType<typeof setTimeout> | null = null;
+const VOICE_SEND_DELAY_MS = 1500; // send after 1.5s of silence
+
+function initVoiceChat(): void {
+  const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+  if (!SpeechRecognition) {
+    const btn = document.getElementById("btn-voice-toggle");
+    if (btn) { btn.style.opacity = "0.3"; btn.title = "Voice not supported in this browser"; }
+    return;
+  }
+
+  recognition = new SpeechRecognition();
+  recognition.continuous = true;
+  recognition.interimResults = true;
+  recognition.lang = "en-IN"; // Indian English — handles Hindi, Marathi and English
+                               // words spoken naturally and writes them in roman script.
+                               // e.g. "tuzh jevan zhal ka" stays as-is, not translated.
+
+  const chatInput = $("chat-input") as HTMLInputElement;
+
+  recognition.onresult = (event: any) => {
+    let interim = "";
+    let final = "";
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+      const t = event.results[i][0].transcript;
+      if (event.results[i].isFinal) final += t;
+      else interim += t;
+    }
+
+    // Show interim in input as visual feedback
+    if (interim) chatInput.value = interim;
+
+    if (final.trim()) {
+      chatInput.value = "";
+      // Auto-send after brief pause (feels natural like voice messaging)
+      if (voiceSendTimer) clearTimeout(voiceSendTimer);
+      voiceSendTimer = setTimeout(async () => {
+        await send({ type: "SEND_CHAT", payload: { text: final.trim(), isGif: false } });
+      }, VOICE_SEND_DELAY_MS);
+    }
+  };
+
+  recognition.onerror = (e: any) => {
+    if (e.error !== "no-speech") {
+      console.warn("[WatchTogether] Speech error:", e.error);
+      stopVoice();
+    }
+  };
+
+  recognition.onend = () => {
+    // Auto-restart if still in voice mode (recognition stops after ~60s of silence)
+    if (voiceMode) recognition.start();
+  };
+}
+
+function startVoice(): void {
+  if (!recognition) return;
+  voiceMode = true;
+  recognition.start();
+  const btn = $("btn-voice-toggle");
+  const input = $("chat-input") as HTMLInputElement;
+  btn.textContent = "🔴";
+  btn.style.background = "rgba(255,71,87,0.2)";
+  btn.style.borderColor = "rgba(255,71,87,0.5)";
+  btn.style.color = "#ff4757";
+  btn.title = "Voice active — click to switch to typing";
+  input.placeholder = "Listening… (speak now)";
+  input.readOnly = true;
+}
+
+function stopVoice(): void {
+  if (!recognition) return;
+  voiceMode = false;
+  try { recognition.stop(); } catch {}
+  const btn = $("btn-voice-toggle");
+  const input = $("chat-input") as HTMLInputElement;
+  btn.textContent = "🎤";
+  btn.style.background = "rgba(255,255,255,0.07)";
+  btn.style.borderColor = "var(--border)";
+  btn.style.color = "var(--muted)";
+  btn.title = "Switch to voice input";
+  input.placeholder = "Message or emoji…";
+  input.readOnly = false;
+  input.focus();
+}
+
+function toggleVoice(): void {
+  voiceMode ? stopVoice() : startVoice();
+}
+
 document.addEventListener("DOMContentLoaded", async () => {
   await initConfig();
 
@@ -370,11 +491,15 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("tab-chat-btn").addEventListener("click", () => switchTab("chat"));
   $("chat-send-btn").addEventListener("click", sendChat);
   $("gif-search-btn").addEventListener("click", searchGif);
+  $("btn-voice-toggle").addEventListener("click", toggleVoice);
   $("chat-input").addEventListener("keydown", (e) => { if ((e as KeyboardEvent).key === "Enter") sendChat(); });
   $("gif-search-input").addEventListener("keydown", (e) => { if ((e as KeyboardEvent).key === "Enter") searchGif(); });
   $("join-room-id").addEventListener("input", (e) => {
     (e.target as HTMLInputElement).value = (e.target as HTMLInputElement).value.toUpperCase();
   });
+
+  initUpdateUrl();
+  initVoiceChat();
 
   const state = await send({ type: "GET_STATE" }).catch(() => null);
   if (state?.state?.userId) currentUserId = state.state.userId;

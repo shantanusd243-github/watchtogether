@@ -101,6 +101,11 @@ public class RoomService {
         if (room != null) room.setControlMode(controlMode);
     }
 
+    public void setMovieUrl(String roomId, String movieUrl) {
+        Room room = rooms.get(roomId);
+        if (room != null) room.setMovieUrl(movieUrl);
+    }
+
     public boolean isOwner(String roomId, String userId) {
         return getRoom(roomId)
             .map(r -> r.getOwnerId().equals(userId))
