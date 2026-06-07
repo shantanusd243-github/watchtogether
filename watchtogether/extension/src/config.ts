@@ -1,21 +1,17 @@
-// Centralized runtime config for extension.
-// All URLs are loaded from config.json at runtime — no hardcoded values.
+// ─── Runtime config ────────────────────────────────────────────────────────
+// __API_BASE__, __WS_BASE__, __APP_BASE__ are replaced at build time by
+// vite.config.ts `define`. No shared module chunk is emitted.
+// initConfig() is kept as a no-op for backward compatibility.
 
-export let API_BASE: string = '';
-export let WS_BASE: string  = '';
-export let APP_BASE: string = '';
+declare const __API_BASE__: string;
+declare const __WS_BASE__: string;
+declare const __APP_BASE__: string;
+
+export const API_BASE: string = __API_BASE__;
+export const WS_BASE:  string = __WS_BASE__;
+export const APP_BASE: string = __APP_BASE__;
 
 export async function initConfig(): Promise<void> {
-  try {
-    const url = chrome.runtime.getURL('config.json');
-    const res = await fetch(url);
-    if (!res.ok) return;
-    const cfg = await res.json();
-    if (cfg.VITE_API_BASE) API_BASE = cfg.VITE_API_BASE;
-    if (cfg.VITE_WS_BASE) WS_BASE = cfg.VITE_WS_BASE;
-    if (cfg.VITE_APP_BASE) APP_BASE = cfg.VITE_APP_BASE;
-    console.info('[WatchTogether] runtime config loaded');
-  } catch (e) {
-    console.info('[WatchTogether] no runtime config or failed to load', e);
-  }
+  // No-op — values are baked in at build time via vite define.
+  // Kept so callers don't need to change.
 }

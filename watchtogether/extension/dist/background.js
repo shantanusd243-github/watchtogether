@@ -141,6 +141,12 @@ function handleRemoteEvent(event) {
   if (event.userId === state.userId) return;
   if (!state.roomState) return;
   switch (event.type) {
+    case "ROOM_STATE":
+      if (event.syncMode) state.roomState.syncMode = event.syncMode;
+      if (event.controlMode) state.roomState.controlMode = event.controlMode;
+      saveState();
+      broadcastToPopup({ type: "STATE_UPDATE", payload: state });
+      break;
     case "MODE_CHANGE":
       if (event.syncMode) state.roomState.syncMode = event.syncMode;
       if (event.controlMode) state.roomState.controlMode = event.controlMode;
@@ -184,6 +190,10 @@ async function refreshRoomState(roomId) {
     const res = await fetch(`${API_BASE}/rooms/${roomId}`);
     if (res.ok) {
       const roomState = await res.json();
+      if (state.roomState) {
+        roomState.syncMode = state.roomState.syncMode;
+        roomState.controlMode = state.roomState.controlMode;
+      }
       state.roomState = roomState;
       await saveState();
       broadcastToPopup({ type: "STATE_UPDATE", payload: state });

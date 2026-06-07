@@ -92,10 +92,13 @@ public class WatchTogetherWebSocketHandler implements WebSocketHandler {
             return;
         }
 
-        // Always stamp the server-side userId and timestamp
+        // Preserve the client's timestamp for latency compensation.
+        // Only set server time if the client didn't send one.
         event.setUserId(userId);
         event.setRoomId(roomId);
-        event.setTimestamp(Instant.now().toEpochMilli());
+        if (event.getTimestamp() == null) {
+            event.setTimestamp(Instant.now().toEpochMilli());
+        }
 
         processEvent(session, event, roomId, userId);
     }

@@ -185,6 +185,15 @@ function handleRemoteEvent(event: WatchEvent): void {
   if (!state.roomState) return;
 
   switch (event.type) {
+    case "ROOM_STATE":
+      // Server sends this on WS connect with current syncMode/controlMode.
+      // Apply it so fresh connections know the room's current state.
+      if (event.syncMode) state.roomState.syncMode = event.syncMode;
+      if (event.controlMode) state.roomState.controlMode = event.controlMode;
+      saveState();
+      broadcastToPopup({ type: "STATE_UPDATE", payload: state });
+      break;
+
     case "MODE_CHANGE":
       if (event.syncMode) state.roomState.syncMode = event.syncMode;
       if (event.controlMode) state.roomState.controlMode = event.controlMode;
@@ -241,6 +250,13 @@ async function refreshRoomState(roomId: string): Promise<void> {
     const res = await fetch(`${API_BASE}/rooms/${roomId}`);
     if (res.ok) {
       const roomState: RoomState = await res.json();
+      // Preserve local syncMode/controlMode — the server may not have
+      // processed the latest MODE_CHANGE WS event yet (race condition).
+      // Overwriting these would silently reset both parties to SYNC/SHARED.
+      if (state.roomState) {
+        roomState.syncMode = state.roomState.syncMode;
+        roomState.controlMode = state.roomState.controlMode;
+      }
       state.roomState = roomState;
       await saveState();
       broadcastToPopup({ type: "STATE_UPDATE", payload: state });
