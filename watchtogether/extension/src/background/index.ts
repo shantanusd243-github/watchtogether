@@ -455,6 +455,51 @@ async function handleMessage(
       break;
     }
 
+    case "START_VOICE": {
+      // Send to ALL frames — SpeechRecognition needs top-level page context
+      if (state.activeTabId) {
+        chrome.tabs.sendMessage(state.activeTabId, { type: "START_VOICE" }, { frameId: 0 }).catch(() => {});
+      }
+      sendResponse({ ok: true });
+      break;
+    }
+
+    case "STOP_VOICE": {
+      if (state.activeTabId) {
+        chrome.tabs.sendMessage(state.activeTabId, { type: "STOP_VOICE" }, { frameId: 0 }).catch(() => {});
+      }
+      sendResponse({ ok: true });
+      break;
+    }
+
+    case "VOICE_TRANSCRIPT": {
+      // Content script sends transcript here → forward to popup
+      broadcastToPopup({ type: "VOICE_TRANSCRIPT", payload: message.payload });
+      // Auto-send as chat if it's a final transcript
+      if (message.payload?.isFinal && message.payload?.text && state.roomState) {
+        const shortId = state.userId.replace("user_", "").toUpperCase().slice(0, 4);
+        const chatMsg: import("../types/index").ChatMessage = {
+          id: Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
+          roomId: state.roomState.roomId,
+          userId: state.userId,
+          displayName: `User ${shortId}`,
+          text: message.payload.text.trim(),
+          isGif: false,
+          timestamp: Date.now(),
+        };
+        broadcastToPopup({ type: "CHAT_RECEIVED", payload: chatMsg });
+        broadcastToContentScript({ type: "CHAT_RECEIVED", payload: chatMsg });
+        sendWsEvent({
+          roomId: state.roomState.roomId,
+          userId: state.userId,
+          type: "CHAT_MESSAGE",
+          chat: chatMsg,
+        });
+      }
+      sendResponse({ ok: true });
+      break;
+    }
+
     case "SEND_CHAT": {
       if (!state.roomState) { sendResponse({ error: "No active room" }); return; }
       const { text, isGif } = message.payload;
@@ -514,7 +559,8 @@ async function handleMessage(
       if (syncMode === "INDEPENDENT") return;
       if (controlMode === "OWNER" && state.userId !== ownerId) return;
 
-      sendWsEvent({ ...event, userId: state.userId, roomId: state.roomState.roomId });
+      // Stamp sentAt so receiver can compensate for network latency
+      sendWsEvent({ ...event, userId: state.userId, roomId: state.roomState.roomId, timestamp: Date.now() });
       break;
     }
 
@@ -530,6 +576,7 @@ async function handleMessage(
         currentTime,
         playing,
         playbackRate,
+        timestamp: Date.now(),
       });
       break;
     }

@@ -334,6 +334,18 @@ function onTimeUpdate(): void {
 }
 
 // ─── Remote Event Application ─────────────────────────────────────────────────
+// Latency compensation: sender stamps event.timestamp (epoch ms).
+// Receiver adds the transit time to currentTime so both are truly in sync.
+function compensatedTime(event: WatchEvent): number {
+  if (!event.currentTime) return 0;
+  if (!event.timestamp || event.type === "PAUSE") return event.currentTime;
+  const transitSec = (Date.now() - event.timestamp) / 1000;
+  // Only compensate if playing and transit is reasonable (< 10s means valid)
+  if (event.playing === false) return event.currentTime;
+  const clamped = Math.min(Math.max(transitSec, 0), 10);
+  return event.currentTime + clamped * (event.playbackRate ?? 1);
+}
+
 async function applyRemoteEvent(event: WatchEvent): Promise<void> {
   if (!videoEl) {
     log("No video element to apply event to");
@@ -346,9 +358,10 @@ async function applyRemoteEvent(event: WatchEvent): Promise<void> {
   try {
     switch (event.type) {
       case "PLAY": {
-        if (event.currentTime !== undefined) {
-          const diff = Math.abs(videoEl.currentTime - event.currentTime);
-          if (diff > 1) nativeSetCurrentTime(videoEl, event.currentTime);
+        const target = compensatedTime(event);
+        if (target) {
+          const diff = Math.abs(videoEl.currentTime - target);
+          if (diff > 0.5) nativeSetCurrentTime(videoEl, target);
         }
         await nativePlay(videoEl);
         break;
@@ -364,9 +377,8 @@ async function applyRemoteEvent(event: WatchEvent): Promise<void> {
       }
 
       case "SEEK": {
-        if (event.currentTime !== undefined) {
-          nativeSetCurrentTime(videoEl, event.currentTime);
-        }
+        const target = compensatedTime(event);
+        if (target) nativeSetCurrentTime(videoEl, target);
         break;
       }
 
@@ -387,10 +399,11 @@ async function applyRemoteEvent(event: WatchEvent): Promise<void> {
           break;
         }
 
-        const diff = Math.abs(videoEl.currentTime - event.currentTime);
+        const target = compensatedTime(event);
+        const diff = Math.abs(videoEl.currentTime - target);
         if (diff > 1.0) {
-          log(`Heartbeat drift ${diff.toFixed(2)}s — correcting`);
-          nativeSetCurrentTime(videoEl, event.currentTime);
+          log(`Heartbeat drift ${diff.toFixed(2)}s — correcting to ${target.toFixed(2)}s`);
+          nativeSetCurrentTime(videoEl, target);
         }
 
         if (event.playbackRate !== undefined && Math.abs(videoEl.playbackRate - event.playbackRate) > 0.01) {
@@ -461,6 +474,18 @@ chrome.runtime.onMessage.addListener(
       case "CHAT_RECEIVED": {
         const msg = message.payload as import("../types/index").ChatMessage;
         showChatOverlay(msg);
+        sendResponse({ ok: true });
+        break;
+      }
+
+      case "START_VOICE": {
+        startVoiceRecognition();
+        sendResponse({ ok: true });
+        break;
+      }
+
+      case "STOP_VOICE": {
+        stopVoiceRecognition();
         sendResponse({ ok: true });
         break;
       }
@@ -606,13 +631,48 @@ function buildChatPanel(): HTMLDivElement {
   const textInput = document.createElement("input");
   textInput.id = "__wt_chat_input__";
   textInput.placeholder = "Message or emoji…";
-  textInput.style.cssText = "flex:1;background:rgba(255,255,255,0.07);border:1px solid rgba(255,255,255,0.12);border-radius:10px;padding:8px 10px;color:#e8e8f0;font-size:13px;outline:none;";
+  textInput.style.cssText = "flex:1;min-width:0;background:rgba(255,255,255,0.07);border:1px solid rgba(255,255,255,0.12);border-radius:10px;padding:8px 10px;color:#e8e8f0;font-size:13px;outline:none;";
+  const emojiBtn = document.createElement("button");
+  emojiBtn.textContent = "😊";
+  emojiBtn.title = "Emoji";
+  emojiBtn.style.cssText = "flex-shrink:0;width:34px;height:34px;background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.15);border-radius:10px;cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center;";
+  const micBtn = document.createElement("button");
+  micBtn.id = "__wt_mic_btn__";
+  micBtn.textContent = "🎤";
+  micBtn.title = "Voice input";
+  micBtn.style.cssText = "flex-shrink:0;width:34px;height:34px;background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.15);border-radius:10px;color:#fff;cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;";
+  micBtn.addEventListener("click", () => {
+    voiceActive ? stopVoiceRecognition() : startVoiceRecognition();
+  });
   const sendBtn = document.createElement("button");
   sendBtn.textContent = "➤";
-  sendBtn.style.cssText = "background:linear-gradient(135deg,#7c6af7,#4ecdc4);border:none;border-radius:10px;color:#fff;cursor:pointer;font-size:14px;padding:7px 10px;";
+  sendBtn.style.cssText = "flex-shrink:0;width:34px;height:34px;background:linear-gradient(135deg,#7c6af7,#4ecdc4);border:none;border-radius:10px;color:#fff;cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;";
   inputRow.appendChild(textInput);
+  inputRow.appendChild(emojiBtn);
+  inputRow.appendChild(micBtn);
   inputRow.appendChild(sendBtn);
   panel.appendChild(inputRow);
+
+  // Emoji picker (inline grid, common emojis)
+  const EMOJIS = ["😂","❤️","😍","🤣","😊","🙏","💕","😭","😘","👍","😁","🔥","💔","💖","😢","🤔","😎","😩","🥺","😏","💪","🙄","😜","🎉","🥳","😤","🙃","😅","😆","🤩","👏","😋","✨","🤯","😳","🤗","💯","🎶","👀","😴","😈","👻","🤦","🤷","💀","🥰","😻","🫶","🫠","🫡","💬","🗣️","🎬","🍿","🎥","📺","🎮"];
+  const emojiGrid = document.createElement("div");
+  emojiGrid.style.cssText = "display:none;position:absolute;bottom:60px;right:10px;width:240px;background:rgba(10,10,20,0.96);border:1px solid rgba(124,106,247,0.4);border-radius:12px;padding:8px;display:none;flex-wrap:wrap;gap:4px;z-index:2147483641;max-height:160px;overflow-y:auto;";
+  EMOJIS.forEach(em => {
+    const btn = document.createElement("button");
+    btn.textContent = em;
+    btn.style.cssText = "background:none;border:none;cursor:pointer;font-size:20px;padding:2px;border-radius:4px;line-height:1;";
+    btn.addEventListener("click", () => {
+      textInput.value += em;
+      textInput.focus();
+    });
+    emojiGrid.appendChild(btn);
+  });
+  panel.style.position = "fixed"; // ensure relative positioning works
+  panel.appendChild(emojiGrid);
+
+  emojiBtn.addEventListener("click", () => {
+    emojiGrid.style.display = emojiGrid.style.display === "none" ? "flex" : "none";
+  });
 
   // Send on Enter or button click
   const doSend = () => {
@@ -624,36 +684,53 @@ function buildChatPanel(): HTMLDivElement {
   sendBtn.addEventListener("click", doSend);
   textInput.addEventListener("keydown", (e) => { if (e.key === "Enter") doSend(); });
 
-  // GIF search via Tenor (free, no key needed for basic usage)
+  // GIF search via Tenor public API (no key required for basic usage)
   gifBtn.addEventListener("click", async () => {
     const q = gifInput.value.trim();
     if (!q) return;
     gifResults.style.display = "flex";
     gifResults.innerHTML = "<span style='color:#6060a0;font-size:11px;padding:4px;'>Searching…</span>";
     try {
-      const res = await fetch(`https://tenor.googleapis.com/v2/search?q=${encodeURIComponent(q)}&key=AIzaSyAyimkuYQYF_FXVALexPmHA2zHg1GiRRH8&limit=8&media_filter=gif`);
+      const res = await fetch(`https://tenor.googleapis.com/v2/search?q=${encodeURIComponent(q)}&key=AIzaSyB_63SFMSXX5k-wLKQtmVMPZe6nhqw&limit=8&media_filter=gif`);
       const data = await res.json();
       gifResults.innerHTML = "";
-      (data.results || []).forEach((r: any) => {
-        const url = r.media_formats?.gif?.url || r.media_formats?.tinygif?.url;
-        if (!url) return;
-        const img = document.createElement("img");
-        img.src = url;
-        img.style.cssText = "width:80px;height:60px;object-fit:cover;border-radius:6px;cursor:pointer;border:2px solid transparent;";
-        img.addEventListener("click", () => {
-          sendToBackground({ type: "SEND_CHAT", payload: { text: url, isGif: true } });
-          gifResults.style.display = "none";
-          gifInput.value = "";
+      const results = data.results || [];
+      if (!results.length) {
+        // Fallback to Giphy public API
+        const g = await fetch(`https://api.giphy.com/v1/gifs/search?api_key=0UTRbFtkMxAplrohufYco1HcGWrNyO&q=${encodeURIComponent(q)}&limit=8&rating=g`);
+        const gd = await g.json();
+        (gd.data || []).forEach((r: any) => {
+          const url = r.images?.fixed_height_small?.url || r.images?.original?.url;
+          if (!url) return;
+          appendGifResult(url, gifResults, gifInput);
         });
-        gifResults.appendChild(img);
-      });
+      } else {
+        results.forEach((r: any) => {
+          const url = r.media_formats?.gif?.url || r.media_formats?.tinygif?.url;
+          if (!url) return;
+          appendGifResult(url, gifResults, gifInput);
+        });
+      }
       if (!gifResults.children.length) gifResults.innerHTML = "<span style='color:#6060a0;font-size:11px;padding:4px;'>No results</span>";
     } catch {
       gifResults.innerHTML = "<span style='color:#ff4757;font-size:11px;padding:4px;'>Search failed</span>";
     }
   });
+  gifInput.addEventListener("keydown", (e) => { if (e.key === "Enter") gifBtn.click(); });
 
   return panel;
+}
+
+function appendGifResult(url: string, container: HTMLElement, inputToClear: HTMLInputElement): void {
+  const img = document.createElement("img");
+  img.src = url;
+  img.style.cssText = "width:80px;height:60px;object-fit:cover;border-radius:6px;cursor:pointer;";
+  img.addEventListener("click", () => {
+    sendToBackground({ type: "SEND_CHAT", payload: { text: url, isGif: true } });
+    container.style.display = "none";
+    inputToClear.value = "";
+  });
+  container.appendChild(img);
 }
 
 function appendMessageToPanel(msg: import("../types/index").ChatMessage): void {
@@ -754,3 +831,108 @@ if (document.body) {
 }
 
 log("Content script initialized on", window.location.href);
+
+// ─── Voice Recognition ───────────────────────────────────────────────────────
+let voiceActive = false;
+
+function createAndStartRecognition(): void {
+  const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+  if (!SR || !voiceActive) return;
+
+  // Fresh instance every sentence — prevents transcript accumulation
+  const rec = new SR();
+  rec.continuous = false;      // auto fires isFinal after each utterance
+  rec.interimResults = true;
+  rec.lang = "en-IN";          // Hindi/Marathi in Roman script
+
+  rec.onresult = (event: any) => {
+    let interim = "";
+    let finalText = "";
+    for (let i = 0; i < event.results.length; i++) {
+      const t = event.results[i][0].transcript;
+      if (event.results[i].isFinal) finalText += t;
+      else interim += t;
+    }
+    // Update overlay chat input with live interim text
+    const overlayInput = document.getElementById("__wt_chat_input__") as HTMLInputElement | null;
+    if (overlayInput && interim) overlayInput.value = interim;
+
+    if (interim) {
+      chrome.runtime.sendMessage({
+        type: "VOICE_TRANSCRIPT",
+        payload: { text: interim, isFinal: false },
+      }).catch(() => {});
+    }
+    if (finalText.trim()) {
+      if (overlayInput) overlayInput.value = "";
+
+      const lower = finalText.trim().toLowerCase();
+
+      // Voice commands — don't send as chat, control video directly
+      const isPauseCmd = /\b(pause|stop)\b.*\b(video|movie|film)\b|\b(video|movie|film)\b.*\b(pause|stop)\b/.test(lower);
+      const isPlayCmd = /\b(play|resume|start)\b.*\b(video|movie|film)\b|\b(video|movie|film)\b.*\b(play|resume|start)\b/.test(lower);
+
+      if (isPauseCmd && videoEl) {
+        log("Voice command: PAUSE");
+        nativePause(videoEl);
+        sendToBackground({
+          type: "VIDEO_EVENT",
+          payload: { type: "PAUSE", currentTime: videoEl.currentTime, playing: false },
+        });
+        return;
+      }
+
+      if (isPlayCmd && videoEl) {
+        log("Voice command: PLAY");
+        nativePlay(videoEl);
+        sendToBackground({
+          type: "VIDEO_EVENT",
+          payload: { type: "PLAY", currentTime: videoEl.currentTime, playing: true },
+        });
+        return;
+      }
+
+      // Not a command — send as chat message
+      chrome.runtime.sendMessage({
+        type: "VOICE_TRANSCRIPT",
+        payload: { text: finalText.trim(), isFinal: true },
+      }).catch(() => {});
+    }
+  };
+
+  rec.onerror = (e: any) => {
+    if (e.error === "not-allowed") {
+      log("Mic permission denied");
+      voiceActive = false;
+      updateVoiceBtnState(false);
+    }
+  };
+
+  rec.onend = () => {
+    // Start a new fresh instance for the next sentence
+    if (voiceActive) setTimeout(() => createAndStartRecognition(), 80);
+  };
+
+  try { rec.start(); } catch { if (voiceActive) setTimeout(() => createAndStartRecognition(), 300); }
+}
+
+function updateVoiceBtnState(active: boolean): void {
+  const btn = document.getElementById("__wt_mic_btn__") as HTMLElement | null;
+  if (!btn) return;
+  btn.textContent = active ? "🔴" : "🎤";
+  btn.style.background = active ? "rgba(255,71,87,0.3)" : "rgba(255,255,255,0.1)";
+}
+
+function startVoiceRecognition(): void {
+  if (voiceActive) return;
+  voiceActive = true;
+  updateVoiceBtnState(true);
+  createAndStartRecognition();
+  log("Voice started (en-IN)");
+}
+
+function stopVoiceRecognition(): void {
+  voiceActive = false;
+  updateVoiceBtnState(false);
+  log("Voice stopped");
+}

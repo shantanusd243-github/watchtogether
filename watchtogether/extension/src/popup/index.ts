@@ -292,12 +292,28 @@ async function searchGif(): Promise<void> {
   results.style.display = "flex";
   results.innerHTML = "<span style='color:var(--muted);font-size:11px;padding:4px;'>Searching…</span>";
   try {
-    const r = await fetch(`https://tenor.googleapis.com/v2/search?q=${encodeURIComponent(q)}&key=AIzaSyAyimkuYQYF_FXVALexPmHA2zHg1GiRRH8&limit=8&media_filter=gif`);
-    const data = await r.json();
+    let gifs: {url: string}[] = [];
+
+    // Try Tenor first
+    try {
+      const r = await fetch(`https://tenor.googleapis.com/v2/search?q=${encodeURIComponent(q)}&key=AIzaSyB_63SFMSXX5k-wLKQtmVMPZe6nhqw&limit=8&media_filter=gif`);
+      const data = await r.json();
+      gifs = (data.results || []).map((res: any) => ({
+        url: res.media_formats?.gif?.url || res.media_formats?.tinygif?.url
+      })).filter((g: any) => g.url);
+    } catch {}
+
+    // Fallback to Giphy if Tenor returns nothing
+    if (!gifs.length) {
+      const g = await fetch(`https://api.giphy.com/v1/gifs/search?api_key=0UTRbFtkMxAplrohufYco1HcGWrNyO&q=${encodeURIComponent(q)}&limit=8&rating=g`);
+      const gd = await g.json();
+      gifs = (gd.data || []).map((res: any) => ({
+        url: res.images?.fixed_height_small?.url || res.images?.original?.url
+      })).filter((g: any) => g.url);
+    }
+
     results.innerHTML = "";
-    (data.results || []).forEach((res: any) => {
-      const url = res.media_formats?.gif?.url || res.media_formats?.tinygif?.url;
-      if (!url) return;
+    gifs.forEach(({ url }) => {
       const img = document.createElement("img");
       img.src = url;
       img.style.cssText = "width:72px;height:54px;object-fit:cover;border-radius:6px;cursor:pointer;";
@@ -324,6 +340,7 @@ function switchTab(tab: "room" | "chat"): void {
   const openMovieBtn = document.getElementById("btn-open-movie");
   if (tab === "room") {
     roomActions.classList.remove("hidden");
+    viewChat.classList.add("hidden");
     viewChat.style.display = "none";
     roomBtn.classList.add("active");
     chatBtn.classList.remove("active");
@@ -335,6 +352,7 @@ function switchTab(tab: "room" | "chat"): void {
     send({ type: "GET_STATE" }).then((res) => { if (res?.state?.roomState) updateRoomUI(res.state); });
   } else {
     roomActions.classList.add("hidden");
+    viewChat.classList.remove("hidden"); // must remove hidden class first
     viewChat.style.display = "flex";
     chatBtn.classList.add("active");
     chatBtn.textContent = "💬 Chat";
@@ -382,85 +400,46 @@ function initUpdateUrl(): void {
 }
 
 // ─── Voice Chat ───────────────────────────────────────────────────────────────
-type SpeechRecognitionType = typeof window extends { SpeechRecognition: infer T } ? T : any;
-let recognition: any = null;
+// SpeechRecognition is NOT available in extension popups (sandboxed context).
+// We delegate to the content script (real page context) via background.
+
 let voiceMode = false;
-let voiceSendTimer: ReturnType<typeof setTimeout> | null = null;
-const VOICE_SEND_DELAY_MS = 1500; // send after 1.5s of silence
 
 function initVoiceChat(): void {
-  const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-  if (!SpeechRecognition) {
-    const btn = document.getElementById("btn-voice-toggle");
-    if (btn) { btn.style.opacity = "0.3"; btn.title = "Voice not supported in this browser"; }
-    return;
-  }
-
-  recognition = new SpeechRecognition();
-  recognition.continuous = true;
-  recognition.interimResults = true;
-  recognition.lang = "en-IN"; // Indian English — handles Hindi, Marathi and English
-                               // words spoken naturally and writes them in roman script.
-                               // e.g. "tuzh jevan zhal ka" stays as-is, not translated.
-
-  const chatInput = $("chat-input") as HTMLInputElement;
-
-  recognition.onresult = (event: any) => {
-    let interim = "";
-    let final = "";
-    for (let i = event.resultIndex; i < event.results.length; i++) {
-      const t = event.results[i][0].transcript;
-      if (event.results[i].isFinal) final += t;
-      else interim += t;
+  // Listen for transcripts coming back from content script via background
+  chrome.runtime.onMessage.addListener((message: import("../types/index").InternalMessage) => {
+    if (message.type !== "VOICE_TRANSCRIPT") return;
+    const { text, isFinal } = message.payload || {};
+    const chatInput = document.getElementById("chat-input") as HTMLInputElement;
+    if (!chatInput) return;
+    // Show interim text in input as visual feedback
+    chatInput.value = text || "";
+    // Clear input when final is sent (background handles the actual send)
+    if (isFinal) {
+      setTimeout(() => { chatInput.value = ""; }, 300);
     }
-
-    // Show interim in input as visual feedback
-    if (interim) chatInput.value = interim;
-
-    if (final.trim()) {
-      chatInput.value = "";
-      // Auto-send after brief pause (feels natural like voice messaging)
-      if (voiceSendTimer) clearTimeout(voiceSendTimer);
-      voiceSendTimer = setTimeout(async () => {
-        await send({ type: "SEND_CHAT", payload: { text: final.trim(), isGif: false } });
-      }, VOICE_SEND_DELAY_MS);
-    }
-  };
-
-  recognition.onerror = (e: any) => {
-    if (e.error !== "no-speech") {
-      console.warn("[WatchTogether] Speech error:", e.error);
-      stopVoice();
-    }
-  };
-
-  recognition.onend = () => {
-    // Auto-restart if still in voice mode (recognition stops after ~60s of silence)
-    if (voiceMode) recognition.start();
-  };
+  });
 }
 
-function startVoice(): void {
-  if (!recognition) return;
+async function startVoice(): Promise<void> {
   voiceMode = true;
-  recognition.start();
-  const btn = $("btn-voice-toggle");
-  const input = $("chat-input") as HTMLInputElement;
+  await send({ type: "START_VOICE" });
+  const btn = document.getElementById("btn-voice-toggle")!;
+  const input = document.getElementById("chat-input") as HTMLInputElement;
   btn.textContent = "🔴";
   btn.style.background = "rgba(255,71,87,0.2)";
   btn.style.borderColor = "rgba(255,71,87,0.5)";
   btn.style.color = "#ff4757";
-  btn.title = "Voice active — click to switch to typing";
-  input.placeholder = "Listening… (speak now)";
+  btn.title = "Voice active — click to stop";
+  input.placeholder = "Listening…";
   input.readOnly = true;
 }
 
-function stopVoice(): void {
-  if (!recognition) return;
+async function stopVoice(): Promise<void> {
   voiceMode = false;
-  try { recognition.stop(); } catch {}
-  const btn = $("btn-voice-toggle");
-  const input = $("chat-input") as HTMLInputElement;
+  await send({ type: "STOP_VOICE" });
+  const btn = document.getElementById("btn-voice-toggle")!;
+  const input = document.getElementById("chat-input") as HTMLInputElement;
   btn.textContent = "🎤";
   btn.style.background = "rgba(255,255,255,0.07)";
   btn.style.borderColor = "var(--border)";
@@ -468,6 +447,7 @@ function stopVoice(): void {
   btn.title = "Switch to voice input";
   input.placeholder = "Message or emoji…";
   input.readOnly = false;
+  input.value = "";
   input.focus();
 }
 
@@ -496,6 +476,30 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("gif-search-input").addEventListener("keydown", (e) => { if ((e as KeyboardEvent).key === "Enter") searchGif(); });
   $("join-room-id").addEventListener("input", (e) => {
     (e.target as HTMLInputElement).value = (e.target as HTMLInputElement).value.toUpperCase();
+  });
+
+  // Emoji picker
+  const EMOJIS = ["😂","❤️","😍","🤣","😊","🙏","💕","😭","😘","👍","😁","🔥","💔","💖","😢","🤔","😎","😩","🥺","😏","💪","🙄","😜","🎉","🥳","😤","🙃","😅","😆","🤩","👏","😋","✨","🤯","😳","🤗","💯","🎶","👀","😴","😈","👻","🤦","🤷","💀","🥰","😻","🫶","🫠","🫡","💬","🗣️","🎬","🍿","🎥","📺","🎮"];
+  const picker = $("emoji-picker");
+  EMOJIS.forEach(em => {
+    const btn = document.createElement("button");
+    btn.textContent = em;
+    btn.style.cssText = "background:none;border:none;cursor:pointer;font-size:18px;padding:2px;border-radius:4px;";
+    btn.addEventListener("click", () => {
+      ($("chat-input") as HTMLInputElement).value += em;
+      ($("chat-input") as HTMLInputElement).focus();
+    });
+    picker.appendChild(btn);
+  });
+  $("btn-emoji-toggle").addEventListener("click", () => {
+    const isHidden = picker.classList.contains("hidden");
+    if (isHidden) {
+      picker.classList.remove("hidden");
+      picker.style.display = "flex";
+    } else {
+      picker.classList.add("hidden");
+      picker.style.display = "none";
+    }
   });
 
   initUpdateUrl();

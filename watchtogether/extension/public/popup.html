@@ -457,12 +457,15 @@
       </div>
       <div id="gif-results" style="display:none;flex-wrap:wrap;gap:4px;margin-bottom:6px;max-height:90px;overflow-y:auto;"></div>
       <!-- Message input -->
-      <div style="display:flex;gap:6px;">
-        <input id="chat-input" type="text" placeholder="Message or emoji…" style="flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:8px 10px;color:var(--text);font-size:13px;outline:none;font-family:inherit;" />
-        <button id="btn-voice-toggle" title="Switch to voice input" style="background:rgba(255,255,255,0.07);border:1px solid var(--border);border-radius:10px;color:var(--muted);cursor:pointer;font-size:15px;padding:7px 9px;transition:all 0.15s;">🎤</button>
-        <button id="chat-send-btn" class="btn btn-primary" style="width:auto;padding:8px 12px;">➤</button>
+      <div style="display:flex;gap:4px;align-items:center;">
+        <input id="chat-input" type="text" placeholder="Message or emoji…" style="flex:1;min-width:0;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:8px 10px;color:var(--text);font-size:13px;outline:none;font-family:inherit;" />
+        <button id="btn-emoji-toggle" title="Emoji" style="flex-shrink:0;width:36px;height:36px;background:rgba(255,255,255,0.07);border:1px solid var(--border);border-radius:10px;cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center;">😊</button>
+        <button id="btn-voice-toggle" title="Voice input" style="flex-shrink:0;width:36px;height:36px;background:rgba(255,255,255,0.07);border:1px solid var(--border);border-radius:10px;color:var(--muted);cursor:pointer;font-size:15px;display:flex;align-items:center;justify-content:center;">🎤</button>
+        <button id="chat-send-btn" class="btn btn-primary" style="flex-shrink:0;width:36px;height:36px;padding:0;display:flex;align-items:center;justify-content:center;">➤</button>
       </div>
       <button class="btn btn-danger" id="btn-leave-chat" style="margin-top:8px;">Leave Room</button>
+      <!-- Emoji picker -->
+      <div id="emoji-picker" class="hidden" style="display:none;flex-wrap:wrap;gap:3px;padding:8px;background:var(--surface);border:1px solid var(--border);border-radius:12px;margin-top:4px;max-height:120px;overflow-y:auto;"></div>
     </div>
   </div>
 

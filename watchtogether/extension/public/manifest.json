@@ -7,8 +7,7 @@
     "tabs",
     "storage",
     "activeTab",
-    "scripting",
-    "microphone"
+    "scripting"
   ],
   "host_permissions": [
     "https://*.netflix.com/*",

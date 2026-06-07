@@ -235,12 +235,24 @@ async function searchGif() {
   results.style.display = "flex";
   results.innerHTML = "<span style='color:var(--muted);font-size:11px;padding:4px;'>Searching…</span>";
   try {
-    const r = await fetch(`https://tenor.googleapis.com/v2/search?q=${encodeURIComponent(q)}&key=AIzaSyAyimkuYQYF_FXVALexPmHA2zHg1GiRRH8&limit=8&media_filter=gif`);
-    const data = await r.json();
+    let gifs = [];
+    try {
+      const r = await fetch(`https://tenor.googleapis.com/v2/search?q=${encodeURIComponent(q)}&key=AIzaSyB_63SFMSXX5k-wLKQtmVMPZe6nhqw&limit=8&media_filter=gif`);
+      const data = await r.json();
+      gifs = (data.results || []).map((res) => ({
+        url: res.media_formats?.gif?.url || res.media_formats?.tinygif?.url
+      })).filter((g) => g.url);
+    } catch {
+    }
+    if (!gifs.length) {
+      const g = await fetch(`https://api.giphy.com/v1/gifs/search?api_key=0UTRbFtkMxAplrohufYco1HcGWrNyO&q=${encodeURIComponent(q)}&limit=8&rating=g`);
+      const gd = await g.json();
+      gifs = (gd.data || []).map((res) => ({
+        url: res.images?.fixed_height_small?.url || res.images?.original?.url
+      })).filter((g2) => g2.url);
+    }
     results.innerHTML = "";
-    (data.results || []).forEach((res) => {
-      const url = res.media_formats?.gif?.url || res.media_formats?.tinygif?.url;
-      if (!url) return;
+    gifs.forEach(({ url }) => {
       const img = document.createElement("img");
       img.src = url;
       img.style.cssText = "width:72px;height:54px;object-fit:cover;border-radius:6px;cursor:pointer;";
@@ -266,6 +278,7 @@ function switchTab(tab) {
   const openMovieBtn = document.getElementById("btn-open-movie");
   if (tab === "room") {
     roomActions.classList.remove("hidden");
+    viewChat.classList.add("hidden");
     viewChat.style.display = "none";
     roomBtn.classList.add("active");
     chatBtn.classList.remove("active");
@@ -278,6 +291,7 @@ function switchTab(tab) {
     });
   } else {
     roomActions.classList.add("hidden");
+    viewChat.classList.remove("hidden");
     viewChat.style.display = "flex";
     chatBtn.classList.add("active");
     chatBtn.textContent = "💬 Chat";
@@ -294,6 +308,84 @@ chrome.runtime.onMessage.addListener((message) => {
     appendChatMessage(message.payload);
   }
 });
+function initUpdateUrl() {
+  const btn = document.getElementById("btn-update-url");
+  const row = document.getElementById("update-url-row");
+  const confirmBtn = document.getElementById("btn-confirm-url");
+  const input = document.getElementById("new-url-input");
+  if (!btn || !row || !confirmBtn || !input) return;
+  btn.addEventListener("click", () => {
+    row.classList.toggle("hidden");
+    if (!row.classList.contains("hidden")) input.focus();
+  });
+  const doUpdate = async () => {
+    const url = input.value.trim();
+    if (!url) return;
+    try {
+      new URL(url);
+    } catch {
+      showError("Invalid URL");
+      return;
+    }
+    const res = await send({ type: "UPDATE_ROOM_URL", payload: { movieUrl: url } });
+    if (res.error) {
+      showError(res.error);
+      return;
+    }
+    input.value = "";
+    row.classList.add("hidden");
+  };
+  confirmBtn.addEventListener("click", doUpdate);
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") doUpdate();
+  });
+}
+let voiceMode = false;
+function initVoiceChat() {
+  chrome.runtime.onMessage.addListener((message) => {
+    if (message.type !== "VOICE_TRANSCRIPT") return;
+    const { text, isFinal } = message.payload || {};
+    const chatInput = document.getElementById("chat-input");
+    if (!chatInput) return;
+    chatInput.value = text || "";
+    if (isFinal) {
+      setTimeout(() => {
+        chatInput.value = "";
+      }, 300);
+    }
+  });
+}
+async function startVoice() {
+  voiceMode = true;
+  await send({ type: "START_VOICE" });
+  const btn = document.getElementById("btn-voice-toggle");
+  const input = document.getElementById("chat-input");
+  btn.textContent = "🔴";
+  btn.style.background = "rgba(255,71,87,0.2)";
+  btn.style.borderColor = "rgba(255,71,87,0.5)";
+  btn.style.color = "#ff4757";
+  btn.title = "Voice active — click to stop";
+  input.placeholder = "Listening…";
+  input.readOnly = true;
+}
+async function stopVoice() {
+  voiceMode = false;
+  await send({ type: "STOP_VOICE" });
+  const btn = document.getElementById("btn-voice-toggle");
+  const input = document.getElementById("chat-input");
+  btn.textContent = "🎤";
+  btn.style.background = "rgba(255,255,255,0.07)";
+  btn.style.borderColor = "var(--border)";
+  btn.style.color = "var(--muted)";
+  btn.title = "Switch to voice input";
+  input.placeholder = "Message or emoji…";
+  input.readOnly = false;
+  input.value = "";
+  input.focus();
+}
+function toggleVoice() {
+  voiceMode ? stopVoice() : startVoice();
+}
 document.addEventListener("DOMContentLoaded", async () => {
   await initConfig();
   $("btn-create").addEventListener("click", createRoom);
@@ -309,6 +401,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("tab-chat-btn").addEventListener("click", () => switchTab("chat"));
   $("chat-send-btn").addEventListener("click", sendChat);
   $("gif-search-btn").addEventListener("click", searchGif);
+  $("btn-voice-toggle").addEventListener("click", toggleVoice);
   $("chat-input").addEventListener("keydown", (e) => {
     if (e.key === "Enter") sendChat();
   });
@@ -318,6 +411,30 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("join-room-id").addEventListener("input", (e) => {
     e.target.value = e.target.value.toUpperCase();
   });
+  const EMOJIS = ["😂", "❤️", "😍", "🤣", "😊", "🙏", "💕", "😭", "😘", "👍", "😁", "🔥", "💔", "💖", "😢", "🤔", "😎", "😩", "🥺", "😏", "💪", "🙄", "😜", "🎉", "🥳", "😤", "🙃", "😅", "😆", "🤩", "👏", "😋", "✨", "🤯", "😳", "🤗", "💯", "🎶", "👀", "😴", "😈", "👻", "🤦", "🤷", "💀", "🥰", "😻", "🫶", "🫠", "🫡", "💬", "🗣️", "🎬", "🍿", "🎥", "📺", "🎮"];
+  const picker = $("emoji-picker");
+  EMOJIS.forEach((em) => {
+    const btn = document.createElement("button");
+    btn.textContent = em;
+    btn.style.cssText = "background:none;border:none;cursor:pointer;font-size:18px;padding:2px;border-radius:4px;";
+    btn.addEventListener("click", () => {
+      $("chat-input").value += em;
+      $("chat-input").focus();
+    });
+    picker.appendChild(btn);
+  });
+  $("btn-emoji-toggle").addEventListener("click", () => {
+    const isHidden = picker.classList.contains("hidden");
+    if (isHidden) {
+      picker.classList.remove("hidden");
+      picker.style.display = "flex";
+    } else {
+      picker.classList.add("hidden");
+      picker.style.display = "none";
+    }
+  });
+  initUpdateUrl();
+  initVoiceChat();
   const state = await send({ type: "GET_STATE" }).catch(() => null);
   if (state?.state?.userId) currentUserId = state.state.userId;
   refreshState();

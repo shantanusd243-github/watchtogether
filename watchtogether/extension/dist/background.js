@@ -149,7 +149,7 @@ function handleRemoteEvent(event) {
       break;
     case "JOIN":
     case "LEAVE":
-      refreshRoomState(state.roomState.roomId);
+      setTimeout(() => refreshRoomState(state.roomState.roomId), 800);
       break;
     case "HEARTBEAT":
     case "PLAY":
@@ -158,6 +158,17 @@ function handleRemoteEvent(event) {
     case "SPEED":
       if (state.roomState.syncMode === "SYNC") {
         broadcastToContentScript({ type: "APPLY_REMOTE_EVENT", payload: event });
+      }
+      break;
+    case "UPDATE_URL":
+      if (event.movieUrl && state.roomState) {
+        state.roomState.movieUrl = event.movieUrl;
+        saveState();
+        broadcastToPopup({ type: "STATE_UPDATE", payload: state });
+        if (state.activeTabId) {
+          chrome.tabs.update(state.activeTabId, { url: event.movieUrl }).catch(() => {
+          });
+        }
       }
       break;
     case "CHAT_MESSAGE":
@@ -354,6 +365,47 @@ async function handleMessage(message, sendResponse) {
       broadcastToPopup({ type: "STATE_UPDATE", payload: state });
       break;
     }
+    case "START_VOICE": {
+      if (state.activeTabId) {
+        chrome.tabs.sendMessage(state.activeTabId, { type: "START_VOICE" }, { frameId: 0 }).catch(() => {
+        });
+      }
+      sendResponse({ ok: true });
+      break;
+    }
+    case "STOP_VOICE": {
+      if (state.activeTabId) {
+        chrome.tabs.sendMessage(state.activeTabId, { type: "STOP_VOICE" }, { frameId: 0 }).catch(() => {
+        });
+      }
+      sendResponse({ ok: true });
+      break;
+    }
+    case "VOICE_TRANSCRIPT": {
+      broadcastToPopup({ type: "VOICE_TRANSCRIPT", payload: message.payload });
+      if (message.payload?.isFinal && message.payload?.text && state.roomState) {
+        const shortId = state.userId.replace("user_", "").toUpperCase().slice(0, 4);
+        const chatMsg = {
+          id: Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
+          roomId: state.roomState.roomId,
+          userId: state.userId,
+          displayName: `User ${shortId}`,
+          text: message.payload.text.trim(),
+          isGif: false,
+          timestamp: Date.now()
+        };
+        broadcastToPopup({ type: "CHAT_RECEIVED", payload: chatMsg });
+        broadcastToContentScript({ type: "CHAT_RECEIVED", payload: chatMsg });
+        sendWsEvent({
+          roomId: state.roomState.roomId,
+          userId: state.userId,
+          type: "CHAT_MESSAGE",
+          chat: chatMsg
+        });
+      }
+      sendResponse({ ok: true });
+      break;
+    }
     case "SEND_CHAT": {
       if (!state.roomState) {
         sendResponse({ error: "No active room" });
@@ -381,13 +433,39 @@ async function handleMessage(message, sendResponse) {
       sendResponse({ ok: true });
       break;
     }
+    case "UPDATE_ROOM_URL": {
+      if (!state.roomState) {
+        sendResponse({ error: "No active room" });
+        return;
+      }
+      const { movieUrl } = message.payload;
+      if (!movieUrl) {
+        sendResponse({ error: "No URL provided" });
+        return;
+      }
+      state.roomState.movieUrl = movieUrl;
+      await saveState();
+      sendWsEvent({
+        roomId: state.roomState.roomId,
+        userId: state.userId,
+        type: "UPDATE_URL",
+        movieUrl
+      });
+      if (state.activeTabId) {
+        chrome.tabs.update(state.activeTabId, { url: movieUrl }).catch(() => {
+        });
+      }
+      broadcastToPopup({ type: "STATE_UPDATE", payload: state });
+      sendResponse({ ok: true });
+      break;
+    }
     case "VIDEO_EVENT": {
       const event = message.payload;
       if (!state.roomState) return;
       const { syncMode, controlMode, ownerId } = state.roomState;
       if (syncMode === "INDEPENDENT") return;
       if (controlMode === "OWNER" && state.userId !== ownerId) return;
-      sendWsEvent({ ...event, userId: state.userId, roomId: state.roomState.roomId });
+      sendWsEvent({ ...event, userId: state.userId, roomId: state.roomState.roomId, timestamp: Date.now() });
       break;
     }
     case "APPLY_REMOTE_EVENT": {
@@ -400,7 +478,8 @@ async function handleMessage(message, sendResponse) {
         type: "HEARTBEAT",
         currentTime,
         playing,
-        playbackRate
+        playbackRate,
+        timestamp: Date.now()
       });
       break;
     }

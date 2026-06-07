@@ -89,6 +89,9 @@ export type InternalMessageType =
   | "WS_DISCONNECTED"
   | "SEND_CHAT"
   | "CHAT_RECEIVED"
+  | "START_VOICE"
+  | "STOP_VOICE"
+  | "VOICE_TRANSCRIPT"
   | "ERROR";
 
 export interface InternalMessage {
